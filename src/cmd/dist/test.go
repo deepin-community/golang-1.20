@@ -194,7 +194,7 @@ func (t *tester) run() {
 	t.timeoutScale = 1
 	switch goarch {
 	case "arm":
-		t.timeoutScale = 3
+		t.timeoutScale = 2
 	case "mips", "mipsle", "mips64", "mips64le":
 		t.timeoutScale = 4
 	}

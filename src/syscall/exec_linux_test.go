@@ -35,10 +35,6 @@ func isLXC() bool {
 	return os.Getenv("container") == "lxc"
 }
 
-func isSchroot() bool {
-	return os.Getenv("SCHROOT_SESSION_ID") != ""
-}
-
 func skipInContainer(t *testing.T) {
 	// TODO: the callers of this func are using this func to skip
 	// tests when running as some sort of "fake root" that's uid 0
@@ -53,9 +49,6 @@ func skipInContainer(t *testing.T) {
 	}
 	if isLXC() {
 		t.Skip("skip this test in LXC container")
-	}
-	if isSchroot() {
-		t.Skip("skip this test in Schroot container")
 	}
 }
 
