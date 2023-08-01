@@ -1,0 +1,41 @@
+From 293729020ebaeec145ed94a7303897007a66c949 Mon Sep 17 00:00:00 2001
+From: limeidan <limeidan@loongson.cn>
+Date: Thu, 25 Aug 2022 11:09:22 +0800
+Subject: [PATCH 16/32] cmd/compile: add support for --buildmode=c-shared on
+ loong64
+
+Change-Id: I78a90155b17d7d8be04e8ba5e4d75e27d15b3311
+---
+ src/cmd/compile/internal/base/flag.go      | 2 +-
+ src/cmd/compile/internal/liveness/plive.go | 2 +-
+ 2 files changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/src/cmd/compile/internal/base/flag.go b/src/cmd/compile/internal/base/flag.go
+index be555c3d06..a09740f736 100644
+--- a/src/cmd/compile/internal/base/flag.go
++++ b/src/cmd/compile/internal/base/flag.go
+@@ -204,7 +204,7 @@ func ParseFlags() {
+ 	if Flag.Race && !platform.RaceDetectorSupported(buildcfg.GOOS, buildcfg.GOARCH) {
+ 		log.Fatalf("%s/%s does not support -race", buildcfg.GOOS, buildcfg.GOARCH)
+ 	}
+-	if (*Flag.Shared || *Flag.Dynlink || *Flag.LinkShared) && !Ctxt.Arch.InFamily(sys.AMD64, sys.ARM, sys.ARM64, sys.I386, sys.PPC64, sys.RISCV64, sys.S390X) {
++	if (*Flag.Shared || *Flag.Dynlink || *Flag.LinkShared) && !Ctxt.Arch.InFamily(sys.AMD64, sys.ARM, sys.ARM64, sys.Loong64, sys.I386, sys.PPC64, sys.RISCV64, sys.S390X) {
+ 		log.Fatalf("%s/%s does not support -shared", buildcfg.GOOS, buildcfg.GOARCH)
+ 	}
+ 	parseSpectre(Flag.Spectre) // left as string for RecordFlags
+diff --git a/src/cmd/compile/internal/liveness/plive.go b/src/cmd/compile/internal/liveness/plive.go
+index 689b5286c6..ab79843ad8 100644
+--- a/src/cmd/compile/internal/liveness/plive.go
++++ b/src/cmd/compile/internal/liveness/plive.go
+@@ -513,7 +513,7 @@ func (lv *liveness) markUnsafePoints() {
+ 					v = v.Args[0]
+ 					continue
+ 				}
+-			case ssa.Op386MOVLload, ssa.OpARM64MOVWUload, ssa.OpPPC64MOVWZload, ssa.OpWasmI64Load32U:
++			case ssa.Op386MOVLload, ssa.OpARM64MOVWUload, ssa.OpLOONG64MOVWUload, ssa.OpPPC64MOVWZload, ssa.OpWasmI64Load32U:
+ 				// Args[0] is the address of the write
+ 				// barrier control. Ignore Args[1],
+ 				// which is the mem operand.
+-- 
+2.40.0
+

@@ -1,0 +1,53 @@
+From 15f8c90c5ab80f321daa4a4093900282054bd24c Mon Sep 17 00:00:00 2001
+From: huangqiqi <huangqiqi@loongson.cn>
+Date: Thu, 16 Mar 2023 13:16:06 +0800
+Subject: [PATCH 24/32] cmd/internal/obj/loong64: add support for movgr2cf and
+ movcf2gr instructions
+
+Change-Id: I223154d86a1034546a72c100125f33754737208e
+---
+ src/cmd/asm/internal/asm/testdata/loong64enc1.s | 3 +++
+ src/cmd/internal/obj/loong64/asm.go             | 9 +++++++++
+ 2 files changed, 12 insertions(+)
+
+diff --git a/src/cmd/asm/internal/asm/testdata/loong64enc1.s b/src/cmd/asm/internal/asm/testdata/loong64enc1.s
+index 0cc077c091..4f3cb2b2ee 100644
+--- a/src/cmd/asm/internal/asm/testdata/loong64enc1.s
++++ b/src/cmd/asm/internal/asm/testdata/loong64enc1.s
+@@ -222,3 +222,6 @@ lable2:
+ 	RDTIMELW R4, R0			// 80600000
+ 	RDTIMEHW R4, R0			// 80640000
+ 	RDTIMED  R4, R5			// 85680000
++
++	MOVV    FCC0, R4		// 04dc1401
++	MOVV    R4, FCC0		// 80d81401
+diff --git a/src/cmd/internal/obj/loong64/asm.go b/src/cmd/internal/obj/loong64/asm.go
+index ca82986bb3..eff60104ce 100644
+--- a/src/cmd/internal/obj/loong64/asm.go
++++ b/src/cmd/internal/obj/loong64/asm.go
+@@ -324,6 +324,9 @@ var optab = []Optab{
+ 	{AMOVV, C_REG, C_NONE, C_FREG, C_NONE, 47, 4, 0, sys.Loong64, 0},
+ 	{AMOVV, C_FREG, C_NONE, C_REG, C_NONE, 48, 4, 0, sys.Loong64, 0},
+ 
++	{AMOVV, C_FCCREG, C_NONE, C_REG, C_NONE, 63, 4, 0, sys.Loong64, 0},
++	{AMOVV, C_REG, C_NONE, C_FCCREG, C_NONE, 64, 4, 0, sys.Loong64, 0},
++
+ 	{AMOVW, C_ADDCON, C_NONE, C_FREG, C_NONE, 34, 8, 0, sys.Loong64, 0},
+ 	{AMOVW, C_ANDCON, C_NONE, C_FREG, C_NONE, 34, 8, 0, sys.Loong64, 0},
+ 
+@@ -1673,6 +1676,12 @@ func (c *ctxt0) asmout(p *obj.Prog, o *Optab, out []uint32) {
+ 
+ 	case 62: // rdtimex rd, rj
+ 		o1 = OP_RR(c.oprr(p.As), uint32(p.To.Reg), uint32(p.RegTo2))
++	case 63: // movv c_fcc0, c_reg ==> movcf2gr rd, cj
++		a := OP_TEN(8, 1335)
++		o1 = OP_RR(a, uint32(p.From.Reg), uint32(p.To.Reg))
++	case 64: // movv c_reg, c_fcc0 ==> movgr2cf cd, rj
++		a := OP_TEN(8, 1334)
++		o1 = OP_RR(a, uint32(p.From.Reg), uint32(p.To.Reg))
+ 	}
+ 
+ 	out[0] = o1
+-- 
+2.40.0
+

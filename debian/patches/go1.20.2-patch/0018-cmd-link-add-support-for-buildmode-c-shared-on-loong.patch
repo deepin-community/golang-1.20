@@ -1,0 +1,76 @@
+From 62dbb19d18e7b55047e773469f6e9bac2af5a15d Mon Sep 17 00:00:00 2001
+From: limeidan <limeidan@loongson.cn>
+Date: Thu, 25 Aug 2022 11:13:41 +0800
+Subject: [PATCH 18/32] cmd/link: add support for --buildmode=c-shared on
+ loong64
+
+Change-Id: I4b726b0cc09e5e008b92b3e0a8a7bdd103b062c4
+---
+ src/cmd/link/internal/ld/config.go   |  2 +-
+ src/cmd/link/internal/loong64/asm.go | 23 +++++++++++++++++++++--
+ 2 files changed, 22 insertions(+), 3 deletions(-)
+
+diff --git a/src/cmd/link/internal/ld/config.go b/src/cmd/link/internal/ld/config.go
+index 336cb33e3b..de2926bab4 100644
+--- a/src/cmd/link/internal/ld/config.go
++++ b/src/cmd/link/internal/ld/config.go
+@@ -75,7 +75,7 @@ func (mode *BuildMode) Set(s string) error {
+ 		*mode = BuildModeCArchive
+ 	case "c-shared":
+ 		switch buildcfg.GOARCH {
+-		case "386", "amd64", "arm", "arm64", "ppc64le", "riscv64", "s390x":
++		case "386", "amd64", "arm", "arm64", "loong64", "ppc64le", "riscv64", "s390x":
+ 		default:
+ 			return badmode()
+ 		}
+diff --git a/src/cmd/link/internal/loong64/asm.go b/src/cmd/link/internal/loong64/asm.go
+index e9cf07023f..2f760fd231 100644
+--- a/src/cmd/link/internal/loong64/asm.go
++++ b/src/cmd/link/internal/loong64/asm.go
+@@ -59,6 +59,21 @@ func elfreloc1(ctxt *ld.Link, out *ld.OutBuf, ldr *loader.Loader, s loader.Sym,
+ 		out.Write64(uint64(elf.R_LARCH_B26) | uint64(elfsym)<<32)
+ 		out.Write64(uint64(r.Xadd))
+ 
++	case objabi.R_LOONG64_TLS_IE_PCREL_HI:
++		out.Write64(uint64(sectoff))
++		out.Write64(uint64(elf.R_LARCH_TLS_IE_PC_HI20) | uint64(elfsym)<<32)
++		out.Write64(uint64(0x0))
++
++	case objabi.R_LOONG64_TLS_IE_LO:
++		out.Write64(uint64(sectoff))
++		out.Write64(uint64(elf.R_LARCH_TLS_IE_PC_LO12) | uint64(elfsym)<<32)
++		out.Write64(uint64(0x0))
++
++	// The pcaddu12i + addi.d instructions is used to obtain address of a symbol on Loong64.
++	// The low 12-bit of the symbol address need to be added. The addi.d instruction have
++	// signed 12-bit immediate operand. The 0x800 (addr+U12 <=> addr+0x800+S12) is introduced
++	// to do sign extending from 12 bits. The 0x804 is 0x800 + 4, 4 is instruction bit
++	// width on Loong64 and is used to correct the PC of the addi.d instruction.
+ 	case objabi.R_ADDRLOONG64:
+ 		out.Write64(uint64(sectoff))
+ 		out.Write64(uint64(elf.R_LARCH_PCALA_LO12) | uint64(elfsym)<<32)
+@@ -99,7 +114,9 @@ func archreloc(target *ld.Target, ldr *loader.Loader, syms *ld.ArchSyms, r loade
+ 		case objabi.R_ADDRLOONG64TLS,
+ 			objabi.R_ADDRLOONG64TLSU,
+ 			objabi.R_CALLLOONG64,
+-			objabi.R_JMPLOONG64:
++			objabi.R_JMPLOONG64,
++			objabi.R_LOONG64_TLS_IE_PCREL_HI,
++			objabi.R_LOONG64_TLS_IE_LO:
+ 			return val, 1, true
+ 		}
+ 	}
+@@ -152,7 +169,9 @@ func extreloc(target *ld.Target, ldr *loader.Loader, r loader.Reloc, s loader.Sy
+ 		objabi.R_CONST,
+ 		objabi.R_GOTOFF,
+ 		objabi.R_CALLLOONG64,
+-		objabi.R_JMPLOONG64:
++		objabi.R_JMPLOONG64,
++		objabi.R_LOONG64_TLS_IE_PCREL_HI,
++		objabi.R_LOONG64_TLS_IE_LO:
+ 		return ld.ExtrelocSimple(ldr, r), true
+ 	}
+ 	return loader.ExtReloc{}, false
+-- 
+2.40.0
+

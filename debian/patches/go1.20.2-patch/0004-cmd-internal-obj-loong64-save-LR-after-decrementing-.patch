@@ -1,0 +1,59 @@
+From f495fdbe972d16bb168e7b90bd942516b12a1d8d Mon Sep 17 00:00:00 2001
+From: Guoqi Chen <chenguoqi@loongson.cn>
+Date: Tue, 5 Jul 2022 19:41:27 +0800
+Subject: [PATCH 04/32] cmd/internal/obj/loong64: save LR after decrementing SP
+
+Refer to CL 413428 and 412474, for loong64, like mips, s390x and riscv, there
+is no single instruction that saves the LR and decrements the SP, so we also
+need to insert an instruction to save the LR after decrementing the SP.
+
+Fixes #56623.
+Updates #53374.
+
+Change-Id: I3de040792f0a041d3d2a98ea89c23a2dd2f4ad10
+---
+ src/cmd/asm/internal/asm/testdata/loong64.s |  4 ++--
+ src/cmd/internal/obj/loong64/obj.go         | 14 ++++++++++++++
+ 2 files changed, 16 insertions(+), 2 deletions(-)
+
+diff --git a/src/cmd/asm/internal/asm/testdata/loong64.s b/src/cmd/asm/internal/asm/testdata/loong64.s
+index 133cf48db4..6c44d2208a 100644
+--- a/src/cmd/asm/internal/asm/testdata/loong64.s
++++ b/src/cmd/asm/internal/asm/testdata/loong64.s
+@@ -6,6 +6,6 @@
+ // TODO: cover more instruction
+ 
+ TEXT foo(SB),DUPOK|NOSPLIT,$0
+-	JAL	1(PC)	//CALL 1(PC)	//000c0054
++	JAL	1(PC)	//CALL 1(PC)	//00100054
+ 	JAL	(R4)	//CALL (R4)	//8100004c
+-	JAL	foo(SB)	//CALL foo(SB)	//00100054
++	JAL	foo(SB)	//CALL foo(SB)	//00140054
+diff --git a/src/cmd/internal/obj/loong64/obj.go b/src/cmd/internal/obj/loong64/obj.go
+index dc05e18c7d..0c1f5c029d 100644
+--- a/src/cmd/internal/obj/loong64/obj.go
++++ b/src/cmd/internal/obj/loong64/obj.go
+@@ -260,6 +260,20 @@ func preprocess(ctxt *obj.Link, cursym *obj.LSym, newprog obj.ProgAlloc) {
+ 				q.Spadj = +autosize
+ 
+ 				q = c.ctxt.EndUnsafePoint(q, c.newprog, -1)
++
++				// On Linux, in a cgo binary we may get a SIGSETXID signal early on
++				// before the signal stack is set, as glibc doesn't allow us to block
++				// SIGSETXID. So a signal may land on the current stack and clobber
++				// the content below the SP. We store the LR again after the SP is
++				// decremented.
++				q = obj.Appendp(q, newprog)
++				q.As = mov
++				q.Pos = p.Pos
++				q.From.Type = obj.TYPE_REG
++				q.From.Reg = REGLINK
++				q.To.Type = obj.TYPE_MEM
++				q.To.Offset = 0
++				q.To.Reg = REGSP
+ 			}
+ 
+ 			if c.cursym.Func().Text.From.Sym.Wrapper() && c.cursym.Func().Text.Mark&LEAF == 0 {
+-- 
+2.40.0
+
