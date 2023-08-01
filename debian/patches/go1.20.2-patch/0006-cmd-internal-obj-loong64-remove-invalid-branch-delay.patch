@@ -1,0 +1,28 @@
+From 15839527d414026b03fe94b7e4d1c97dc5814f28 Mon Sep 17 00:00:00 2001
+From: Guoqi Chen <chenguoqi@loongson.cn>
+Date: Wed, 3 Aug 2022 17:45:02 +0800
+Subject: [PATCH 06/32] cmd/internal/obj/loong64: remove invalid branch delay
+ slots
+
+Change-Id: I222717771019f7aefa547971b2d94ef4677a42c9
+---
+ src/cmd/internal/obj/loong64/asm.go | 3 ---
+ 1 file changed, 3 deletions(-)
+
+diff --git a/src/cmd/internal/obj/loong64/asm.go b/src/cmd/internal/obj/loong64/asm.go
+index 982ddd8103..02e44ee0a1 100644
+--- a/src/cmd/internal/obj/loong64/asm.go
++++ b/src/cmd/internal/obj/loong64/asm.go
+@@ -435,9 +435,6 @@ func span0(ctxt *obj.Link, cursym *obj.LSym, newprog obj.ProgAlloc) {
+ 					q.Pos = p.Pos
+ 					q.To.Type = obj.TYPE_BRANCH
+ 					q.To.SetTarget(q.Link.Link)
+-
+-					c.addnop(p.Link)
+-					c.addnop(p)
+ 					bflag = 1
+ 				}
+ 			}
+-- 
+2.40.0
+

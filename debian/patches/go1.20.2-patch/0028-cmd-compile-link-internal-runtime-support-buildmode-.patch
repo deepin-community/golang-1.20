@@ -1,0 +1,1390 @@
+From 053abe2133ccc2e109f61011128dadeff31e4290 Mon Sep 17 00:00:00 2001
+From: Guoqi Chen <chenguoqi@loongson.cn>
+Date: Wed, 22 Mar 2023 06:31:51 +0800
+Subject: [PATCH 28/32] cmd/{compile,link,internal},runtime: support
+ -buildmode=shared for loong64
+
+Signed-off-by: Guoqi Chen <chenguoqi@loongson.cn>
+Change-Id: I1c02373496d5f6e13282a4055d294dc76db30518
+---
+ .../compile/internal/ssa/_gen/LOONG64.rules   | 101 ++++------
+ src/cmd/compile/internal/ssa/regalloc.go      |   2 +
+ .../compile/internal/ssa/rewriteLOONG64.go    | 190 +++++++++++-------
+ src/cmd/internal/obj/loong64/a.out.go         |   1 +
+ src/cmd/internal/obj/loong64/asm.go           |  75 ++++---
+ src/cmd/internal/obj/loong64/cnames.go        |   1 +
+ src/cmd/internal/obj/loong64/obj.go           | 116 +++++++++++
+ src/cmd/internal/objabi/reloctype.go          |   5 +
+ src/cmd/internal/objabi/reloctype_string.go   |  20 +-
+ src/cmd/link/internal/ld/config.go            |   2 +-
+ src/cmd/link/internal/ld/lib.go               |   6 +
+ src/cmd/link/internal/loong64/asm.go          |  57 +++++-
+ src/internal/platform/supported.go            |   2 +-
+ src/runtime/asm_loong64.s                     |  10 +
+ src/runtime/internal/atomic/atomic_loong64.s  |   6 +-
+ 15 files changed, 414 insertions(+), 180 deletions(-)
+
+diff --git a/src/cmd/compile/internal/ssa/_gen/LOONG64.rules b/src/cmd/compile/internal/ssa/_gen/LOONG64.rules
+index 1caaf13600..f8c07f3024 100644
+--- a/src/cmd/compile/internal/ssa/_gen/LOONG64.rules
++++ b/src/cmd/compile/internal/ssa/_gen/LOONG64.rules
+@@ -453,66 +453,47 @@
+ (ADDVconst [off1] (MOVVaddr [off2] {sym} ptr)) && is32Bit(off1+int64(off2)) => (MOVVaddr [int32(off1)+int32(off2)] {sym} ptr)
+ 
+ // fold address into load/store
+-(MOVBload  [off1] {sym} (ADDVconst [off2] ptr) mem) && is32Bit(int64(off1)+off2) => (MOVBload  [off1+int32(off2)] {sym} ptr mem)
+-(MOVBUload [off1] {sym} (ADDVconst [off2] ptr) mem) && is32Bit(int64(off1)+off2) => (MOVBUload [off1+int32(off2)] {sym} ptr mem)
+-(MOVHload  [off1] {sym} (ADDVconst [off2] ptr) mem) && is32Bit(int64(off1)+off2) => (MOVHload  [off1+int32(off2)] {sym} ptr mem)
+-(MOVHUload [off1] {sym} (ADDVconst [off2] ptr) mem) && is32Bit(int64(off1)+off2) => (MOVHUload [off1+int32(off2)] {sym} ptr mem)
+-(MOVWload  [off1] {sym} (ADDVconst [off2] ptr) mem) && is32Bit(int64(off1)+off2) => (MOVWload  [off1+int32(off2)] {sym} ptr mem)
+-(MOVWUload [off1] {sym} (ADDVconst [off2] ptr) mem) && is32Bit(int64(off1)+off2) => (MOVWUload [off1+int32(off2)] {sym} ptr mem)
+-(MOVVload  [off1] {sym} (ADDVconst [off2] ptr) mem) && is32Bit(int64(off1)+off2) => (MOVVload  [off1+int32(off2)] {sym} ptr mem)
+-(MOVFload  [off1] {sym} (ADDVconst [off2] ptr) mem) && is32Bit(int64(off1)+off2) => (MOVFload  [off1+int32(off2)] {sym} ptr mem)
+-(MOVDload  [off1] {sym} (ADDVconst [off2] ptr) mem) && is32Bit(int64(off1)+off2) => (MOVDload  [off1+int32(off2)] {sym} ptr mem)
+-
+-(MOVBstore [off1] {sym} (ADDVconst [off2] ptr) val mem) && is32Bit(int64(off1)+off2) => (MOVBstore [off1+int32(off2)] {sym} ptr val mem)
+-(MOVHstore [off1] {sym} (ADDVconst [off2] ptr) val mem) && is32Bit(int64(off1)+off2) => (MOVHstore [off1+int32(off2)] {sym} ptr val mem)
+-(MOVWstore [off1] {sym} (ADDVconst [off2] ptr) val mem) && is32Bit(int64(off1)+off2) => (MOVWstore [off1+int32(off2)] {sym} ptr val mem)
+-(MOVVstore [off1] {sym} (ADDVconst [off2] ptr) val mem) && is32Bit(int64(off1)+off2) => (MOVVstore [off1+int32(off2)] {sym} ptr val mem)
+-(MOVFstore [off1] {sym} (ADDVconst [off2] ptr) val mem) && is32Bit(int64(off1)+off2) => (MOVFstore [off1+int32(off2)] {sym} ptr val mem)
+-(MOVDstore [off1] {sym} (ADDVconst [off2] ptr) val mem) && is32Bit(int64(off1)+off2) => (MOVDstore [off1+int32(off2)] {sym} ptr val mem)
+-(MOVBstorezero [off1] {sym} (ADDVconst [off2] ptr) mem) && is32Bit(int64(off1)+off2) => (MOVBstorezero [off1+int32(off2)] {sym} ptr mem)
+-(MOVHstorezero [off1] {sym} (ADDVconst [off2] ptr) mem) && is32Bit(int64(off1)+off2) => (MOVHstorezero [off1+int32(off2)] {sym} ptr mem)
+-(MOVWstorezero [off1] {sym} (ADDVconst [off2] ptr) mem) && is32Bit(int64(off1)+off2) => (MOVWstorezero [off1+int32(off2)] {sym} ptr mem)
+-(MOVVstorezero [off1] {sym} (ADDVconst [off2] ptr) mem) && is32Bit(int64(off1)+off2) => (MOVVstorezero [off1+int32(off2)] {sym} ptr mem)
+-
+-(MOVBload [off1] {sym1} (MOVVaddr [off2] {sym2} ptr) mem) && canMergeSym(sym1,sym2) && is32Bit(int64(off1)+int64(off2)) =>
+-	(MOVBload [off1+int32(off2)] {mergeSym(sym1,sym2)} ptr mem)
+-(MOVBUload [off1] {sym1} (MOVVaddr [off2] {sym2} ptr) mem) && canMergeSym(sym1,sym2) && is32Bit(int64(off1)+int64(off2)) =>
+-	(MOVBUload [off1+int32(off2)] {mergeSym(sym1,sym2)} ptr mem)
+-(MOVHload [off1] {sym1} (MOVVaddr [off2] {sym2} ptr) mem) && canMergeSym(sym1,sym2) && is32Bit(int64(off1)+int64(off2)) =>
+-	(MOVHload [off1+int32(off2)] {mergeSym(sym1,sym2)} ptr mem)
+-(MOVHUload [off1] {sym1} (MOVVaddr [off2] {sym2} ptr) mem) && canMergeSym(sym1,sym2) && is32Bit(int64(off1)+int64(off2)) =>
+-	(MOVHUload [off1+int32(off2)] {mergeSym(sym1,sym2)} ptr mem)
+-(MOVWload [off1] {sym1} (MOVVaddr [off2] {sym2} ptr) mem) && canMergeSym(sym1,sym2) && is32Bit(int64(off1)+int64(off2)) =>
+-	(MOVWload [off1+int32(off2)] {mergeSym(sym1,sym2)} ptr mem)
+-(MOVWUload [off1] {sym1} (MOVVaddr [off2] {sym2} ptr) mem) && canMergeSym(sym1,sym2) && is32Bit(int64(off1)+int64(off2)) =>
+-	(MOVWUload [off1+int32(off2)] {mergeSym(sym1,sym2)} ptr mem)
+-(MOVVload [off1] {sym1} (MOVVaddr [off2] {sym2} ptr) mem) && canMergeSym(sym1,sym2) && is32Bit(int64(off1)+int64(off2)) =>
+-	(MOVVload [off1+int32(off2)] {mergeSym(sym1,sym2)} ptr mem)
+-(MOVFload [off1] {sym1} (MOVVaddr [off2] {sym2} ptr) mem) && canMergeSym(sym1,sym2) && is32Bit(int64(off1)+int64(off2)) =>
+-	(MOVFload [off1+int32(off2)] {mergeSym(sym1,sym2)} ptr mem)
+-(MOVDload [off1] {sym1} (MOVVaddr [off2] {sym2} ptr) mem) && canMergeSym(sym1,sym2) && is32Bit(int64(off1)+int64(off2)) =>
+-	(MOVDload [off1+int32(off2)] {mergeSym(sym1,sym2)} ptr mem)
+-
+-(MOVBstore [off1] {sym1} (MOVVaddr [off2] {sym2} ptr) val mem) && canMergeSym(sym1,sym2) && is32Bit(int64(off1)+int64(off2)) =>
+-	(MOVBstore [off1+int32(off2)] {mergeSym(sym1,sym2)} ptr val mem)
+-(MOVHstore [off1] {sym1} (MOVVaddr [off2] {sym2} ptr) val mem) && canMergeSym(sym1,sym2) && is32Bit(int64(off1)+int64(off2)) =>
+-	(MOVHstore [off1+int32(off2)] {mergeSym(sym1,sym2)} ptr val mem)
+-(MOVWstore [off1] {sym1} (MOVVaddr [off2] {sym2} ptr) val mem) && canMergeSym(sym1,sym2) && is32Bit(int64(off1)+int64(off2)) =>
+-	(MOVWstore [off1+int32(off2)] {mergeSym(sym1,sym2)} ptr val mem)
+-(MOVVstore [off1] {sym1} (MOVVaddr [off2] {sym2} ptr) val mem) && canMergeSym(sym1,sym2) && is32Bit(int64(off1)+int64(off2)) =>
+-	(MOVVstore [off1+int32(off2)] {mergeSym(sym1,sym2)} ptr val mem)
+-(MOVFstore [off1] {sym1} (MOVVaddr [off2] {sym2} ptr) val mem) && canMergeSym(sym1,sym2) && is32Bit(int64(off1)+int64(off2)) =>
+-	(MOVFstore [off1+int32(off2)] {mergeSym(sym1,sym2)} ptr val mem)
+-(MOVDstore [off1] {sym1} (MOVVaddr [off2] {sym2} ptr) val mem) && canMergeSym(sym1,sym2) && is32Bit(int64(off1)+int64(off2)) =>
+-	(MOVDstore [off1+int32(off2)] {mergeSym(sym1,sym2)} ptr val mem)
+-(MOVBstorezero [off1] {sym1} (MOVVaddr [off2] {sym2} ptr) mem) && canMergeSym(sym1,sym2) && is32Bit(int64(off1)+int64(off2)) =>
+-	(MOVBstorezero [off1+int32(off2)] {mergeSym(sym1,sym2)} ptr mem)
+-(MOVHstorezero [off1] {sym1} (MOVVaddr [off2] {sym2} ptr) mem) && canMergeSym(sym1,sym2) && is32Bit(int64(off1)+int64(off2)) =>
+-	(MOVHstorezero [off1+int32(off2)] {mergeSym(sym1,sym2)} ptr mem)
+-(MOVWstorezero [off1] {sym1} (MOVVaddr [off2] {sym2} ptr) mem) && canMergeSym(sym1,sym2) && is32Bit(int64(off1)+int64(off2)) =>
+-	(MOVWstorezero [off1+int32(off2)] {mergeSym(sym1,sym2)} ptr mem)
+-(MOVVstorezero [off1] {sym1} (MOVVaddr [off2] {sym2} ptr) mem) && canMergeSym(sym1,sym2) && is32Bit(int64(off1)+int64(off2)) =>
+-	(MOVVstorezero [off1+int32(off2)] {mergeSym(sym1,sym2)} ptr mem)
++(MOVBload  [off1] {sym} (ADDVconst [off2] ptr) mem) && is32Bit(int64(off1)+off2) && (ptr.Op != OpSB || !config.ctxt.Flag_dynlink) => (MOVBload  [off1+int32(off2)] {sym} ptr mem)
++(MOVBUload [off1] {sym} (ADDVconst [off2] ptr) mem) && is32Bit(int64(off1)+off2) && (ptr.Op != OpSB || !config.ctxt.Flag_dynlink) => (MOVBUload [off1+int32(off2)] {sym} ptr mem)
++(MOVHload  [off1] {sym} (ADDVconst [off2] ptr) mem) && is32Bit(int64(off1)+off2) && (ptr.Op != OpSB || !config.ctxt.Flag_dynlink) => (MOVHload  [off1+int32(off2)] {sym} ptr mem)
++(MOVHUload [off1] {sym} (ADDVconst [off2] ptr) mem) && is32Bit(int64(off1)+off2) && (ptr.Op != OpSB || !config.ctxt.Flag_dynlink) => (MOVHUload [off1+int32(off2)] {sym} ptr mem)
++(MOVWload  [off1] {sym} (ADDVconst [off2] ptr) mem) && is32Bit(int64(off1)+off2) && (ptr.Op != OpSB || !config.ctxt.Flag_dynlink) => (MOVWload  [off1+int32(off2)] {sym} ptr mem)
++(MOVWUload [off1] {sym} (ADDVconst [off2] ptr) mem) && is32Bit(int64(off1)+off2) && (ptr.Op != OpSB || !config.ctxt.Flag_dynlink) => (MOVWUload [off1+int32(off2)] {sym} ptr mem)
++(MOVVload  [off1] {sym} (ADDVconst [off2] ptr) mem) && is32Bit(int64(off1)+off2) && (ptr.Op != OpSB || !config.ctxt.Flag_dynlink) => (MOVVload  [off1+int32(off2)] {sym} ptr mem)
++(MOVFload  [off1] {sym} (ADDVconst [off2] ptr) mem) && is32Bit(int64(off1)+off2) && (ptr.Op != OpSB || !config.ctxt.Flag_dynlink) => (MOVFload  [off1+int32(off2)] {sym} ptr mem)
++(MOVDload  [off1] {sym} (ADDVconst [off2] ptr) mem) && is32Bit(int64(off1)+off2) && (ptr.Op != OpSB || !config.ctxt.Flag_dynlink) => (MOVDload  [off1+int32(off2)] {sym} ptr mem)
++
++(MOVBstore [off1] {sym} (ADDVconst [off2] ptr) val mem) && is32Bit(int64(off1)+off2) && (ptr.Op != OpSB || !config.ctxt.Flag_dynlink) => (MOVBstore [off1+int32(off2)] {sym} ptr val mem)
++(MOVHstore [off1] {sym} (ADDVconst [off2] ptr) val mem) && is32Bit(int64(off1)+off2) && (ptr.Op != OpSB || !config.ctxt.Flag_dynlink) => (MOVHstore [off1+int32(off2)] {sym} ptr val mem)
++(MOVWstore [off1] {sym} (ADDVconst [off2] ptr) val mem) && is32Bit(int64(off1)+off2) && (ptr.Op != OpSB || !config.ctxt.Flag_dynlink) => (MOVWstore [off1+int32(off2)] {sym} ptr val mem)
++(MOVVstore [off1] {sym} (ADDVconst [off2] ptr) val mem) && is32Bit(int64(off1)+off2) && (ptr.Op != OpSB || !config.ctxt.Flag_dynlink) => (MOVVstore [off1+int32(off2)] {sym} ptr val mem)
++(MOVFstore [off1] {sym} (ADDVconst [off2] ptr) val mem) && is32Bit(int64(off1)+off2) && (ptr.Op != OpSB || !config.ctxt.Flag_dynlink) => (MOVFstore [off1+int32(off2)] {sym} ptr val mem)
++(MOVDstore [off1] {sym} (ADDVconst [off2] ptr) val mem) && is32Bit(int64(off1)+off2) && (ptr.Op != OpSB || !config.ctxt.Flag_dynlink) => (MOVDstore [off1+int32(off2)] {sym} ptr val mem)
++(MOVBstorezero [off1] {sym} (ADDVconst [off2] ptr) mem) && is32Bit(int64(off1)+off2) && (ptr.Op != OpSB || !config.ctxt.Flag_dynlink) => (MOVBstorezero [off1+int32(off2)] {sym} ptr mem)
++(MOVHstorezero [off1] {sym} (ADDVconst [off2] ptr) mem) && is32Bit(int64(off1)+off2) && (ptr.Op != OpSB || !config.ctxt.Flag_dynlink) => (MOVHstorezero [off1+int32(off2)] {sym} ptr mem)
++(MOVWstorezero [off1] {sym} (ADDVconst [off2] ptr) mem) && is32Bit(int64(off1)+off2) && (ptr.Op != OpSB || !config.ctxt.Flag_dynlink) => (MOVWstorezero [off1+int32(off2)] {sym} ptr mem)
++(MOVVstorezero [off1] {sym} (ADDVconst [off2] ptr) mem) && is32Bit(int64(off1)+off2) && (ptr.Op != OpSB || !config.ctxt.Flag_dynlink) => (MOVVstorezero [off1+int32(off2)] {sym} ptr mem)
++
++(MOVBload [off1] {sym1} (MOVVaddr [off2] {sym2} ptr) mem) && canMergeSym(sym1,sym2) && is32Bit(int64(off1)+int64(off2)) && (ptr.Op != OpSB || !config.ctxt.Flag_dynlink) => (MOVBload [off1+int32(off2)] {mergeSym(sym1,sym2)} ptr mem)
++(MOVBUload [off1] {sym1} (MOVVaddr [off2] {sym2} ptr) mem) && canMergeSym(sym1,sym2) && is32Bit(int64(off1)+int64(off2)) && (ptr.Op != OpSB || !config.ctxt.Flag_dynlink) => (MOVBUload [off1+int32(off2)] {mergeSym(sym1,sym2)} ptr mem)
++(MOVHload [off1] {sym1} (MOVVaddr [off2] {sym2} ptr) mem) && canMergeSym(sym1,sym2) && is32Bit(int64(off1)+int64(off2)) && (ptr.Op != OpSB || !config.ctxt.Flag_dynlink) => (MOVHload [off1+int32(off2)] {mergeSym(sym1,sym2)} ptr mem)
++(MOVHUload [off1] {sym1} (MOVVaddr [off2] {sym2} ptr) mem) && canMergeSym(sym1,sym2) && is32Bit(int64(off1)+int64(off2)) && (ptr.Op != OpSB || !config.ctxt.Flag_dynlink) => (MOVHUload [off1+int32(off2)] {mergeSym(sym1,sym2)} ptr mem)
++(MOVWload [off1] {sym1} (MOVVaddr [off2] {sym2} ptr) mem) && canMergeSym(sym1,sym2) && is32Bit(int64(off1)+int64(off2)) && (ptr.Op != OpSB || !config.ctxt.Flag_dynlink) => (MOVWload [off1+int32(off2)] {mergeSym(sym1,sym2)} ptr mem)
++(MOVWUload [off1] {sym1} (MOVVaddr [off2] {sym2} ptr) mem) && canMergeSym(sym1,sym2) && is32Bit(int64(off1)+int64(off2)) && (ptr.Op != OpSB || !config.ctxt.Flag_dynlink) => (MOVWUload [off1+int32(off2)] {mergeSym(sym1,sym2)} ptr mem)
++(MOVVload [off1] {sym1} (MOVVaddr [off2] {sym2} ptr) mem) && canMergeSym(sym1,sym2) && is32Bit(int64(off1)+int64(off2)) && (ptr.Op != OpSB || !config.ctxt.Flag_dynlink) => (MOVVload [off1+int32(off2)] {mergeSym(sym1,sym2)} ptr mem)
++(MOVFload [off1] {sym1} (MOVVaddr [off2] {sym2} ptr) mem) && canMergeSym(sym1,sym2) && is32Bit(int64(off1)+int64(off2)) && (ptr.Op != OpSB || !config.ctxt.Flag_dynlink) => (MOVFload [off1+int32(off2)] {mergeSym(sym1,sym2)} ptr mem)
++(MOVDload [off1] {sym1} (MOVVaddr [off2] {sym2} ptr) mem) && canMergeSym(sym1,sym2) && is32Bit(int64(off1)+int64(off2)) && (ptr.Op != OpSB || !config.ctxt.Flag_dynlink) => (MOVDload [off1+int32(off2)] {mergeSym(sym1,sym2)} ptr mem)
++
++(MOVBstore [off1] {sym1} (MOVVaddr [off2] {sym2} ptr) val mem) && canMergeSym(sym1,sym2) && is32Bit(int64(off1)+int64(off2)) && (ptr.Op != OpSB || !config.ctxt.Flag_dynlink) => (MOVBstore [off1+int32(off2)] {mergeSym(sym1,sym2)} ptr val mem)
++(MOVHstore [off1] {sym1} (MOVVaddr [off2] {sym2} ptr) val mem) && canMergeSym(sym1,sym2) && is32Bit(int64(off1)+int64(off2)) && (ptr.Op != OpSB || !config.ctxt.Flag_dynlink) => (MOVHstore [off1+int32(off2)] {mergeSym(sym1,sym2)} ptr val mem)
++(MOVWstore [off1] {sym1} (MOVVaddr [off2] {sym2} ptr) val mem) && canMergeSym(sym1,sym2) && is32Bit(int64(off1)+int64(off2)) && (ptr.Op != OpSB || !config.ctxt.Flag_dynlink) => (MOVWstore [off1+int32(off2)] {mergeSym(sym1,sym2)} ptr val mem)
++(MOVVstore [off1] {sym1} (MOVVaddr [off2] {sym2} ptr) val mem) && canMergeSym(sym1,sym2) && is32Bit(int64(off1)+int64(off2)) && (ptr.Op != OpSB || !config.ctxt.Flag_dynlink) => (MOVVstore [off1+int32(off2)] {mergeSym(sym1,sym2)} ptr val mem)
++(MOVFstore [off1] {sym1} (MOVVaddr [off2] {sym2} ptr) val mem) && canMergeSym(sym1,sym2) && is32Bit(int64(off1)+int64(off2)) && (ptr.Op != OpSB || !config.ctxt.Flag_dynlink) => (MOVFstore [off1+int32(off2)] {mergeSym(sym1,sym2)} ptr val mem)
++(MOVDstore [off1] {sym1} (MOVVaddr [off2] {sym2} ptr) val mem) && canMergeSym(sym1,sym2) && is32Bit(int64(off1)+int64(off2)) && (ptr.Op != OpSB || !config.ctxt.Flag_dynlink) => (MOVDstore [off1+int32(off2)] {mergeSym(sym1,sym2)} ptr val mem)
++(MOVBstorezero [off1] {sym1} (MOVVaddr [off2] {sym2} ptr) mem) && canMergeSym(sym1,sym2) && is32Bit(int64(off1)+int64(off2)) && (ptr.Op != OpSB || !config.ctxt.Flag_dynlink) => (MOVBstorezero [off1+int32(off2)] {mergeSym(sym1,sym2)} ptr mem)
++(MOVHstorezero [off1] {sym1} (MOVVaddr [off2] {sym2} ptr) mem) && canMergeSym(sym1,sym2) && is32Bit(int64(off1)+int64(off2)) && (ptr.Op != OpSB || !config.ctxt.Flag_dynlink) => (MOVHstorezero [off1+int32(off2)] {mergeSym(sym1,sym2)} ptr mem)
++(MOVWstorezero [off1] {sym1} (MOVVaddr [off2] {sym2} ptr) mem) && canMergeSym(sym1,sym2) && is32Bit(int64(off1)+int64(off2)) && (ptr.Op != OpSB || !config.ctxt.Flag_dynlink) => (MOVWstorezero [off1+int32(off2)] {mergeSym(sym1,sym2)} ptr mem)
++(MOVVstorezero [off1] {sym1} (MOVVaddr [off2] {sym2} ptr) mem) && canMergeSym(sym1,sym2) && is32Bit(int64(off1)+int64(off2)) && (ptr.Op != OpSB || !config.ctxt.Flag_dynlink) => (MOVVstorezero [off1+int32(off2)] {mergeSym(sym1,sym2)} ptr mem)
+ 
+ (LoweredAtomicStore(32|64) ptr (MOVVconst [0]) mem) => (LoweredAtomicStorezero(32|64) ptr mem)
+ (LoweredAtomicAdd32 ptr (MOVVconst [c]) mem) && is32Bit(c) => (LoweredAtomicAddconst32 [int32(c)] ptr mem)
+diff --git a/src/cmd/compile/internal/ssa/regalloc.go b/src/cmd/compile/internal/ssa/regalloc.go
+index 294c522a90..db6b5a6eca 100644
+--- a/src/cmd/compile/internal/ssa/regalloc.go
++++ b/src/cmd/compile/internal/ssa/regalloc.go
+@@ -640,6 +640,8 @@ func (s *regAllocState) init(f *Func) {
+ 			s.allocatable &^= 1 << 9 // R9
+ 		case "arm64":
+ 			// nothing to do
++		case "loong64":
++			// nothing to do
+ 		case "ppc64le": // R2 already reserved.
+ 			// nothing to do
+ 		case "riscv64": // X3 (aka GP) and X4 (aka TP) already reserved.
+diff --git a/src/cmd/compile/internal/ssa/rewriteLOONG64.go b/src/cmd/compile/internal/ssa/rewriteLOONG64.go
+index f6da0b7ff0..1a2593ef55 100644
+--- a/src/cmd/compile/internal/ssa/rewriteLOONG64.go
++++ b/src/cmd/compile/internal/ssa/rewriteLOONG64.go
+@@ -1674,8 +1674,10 @@ func rewriteValueLOONG64_OpLOONG64MASKNEZ(v *Value) bool {
+ func rewriteValueLOONG64_OpLOONG64MOVBUload(v *Value) bool {
+ 	v_1 := v.Args[1]
+ 	v_0 := v.Args[0]
++	b := v.Block
++	config := b.Func.Config
+ 	// match: (MOVBUload [off1] {sym} (ADDVconst [off2] ptr) mem)
+-	// cond: is32Bit(int64(off1)+off2)
++	// cond: is32Bit(int64(off1)+off2) && (ptr.Op != OpSB || !config.ctxt.Flag_dynlink)
+ 	// result: (MOVBUload [off1+int32(off2)] {sym} ptr mem)
+ 	for {
+ 		off1 := auxIntToInt32(v.AuxInt)
+@@ -1686,7 +1688,7 @@ func rewriteValueLOONG64_OpLOONG64MOVBUload(v *Value) bool {
+ 		off2 := auxIntToInt64(v_0.AuxInt)
+ 		ptr := v_0.Args[0]
+ 		mem := v_1
+-		if !(is32Bit(int64(off1) + off2)) {
++		if !(is32Bit(int64(off1)+off2) && (ptr.Op != OpSB || !config.ctxt.Flag_dynlink)) {
+ 			break
+ 		}
+ 		v.reset(OpLOONG64MOVBUload)
+@@ -1696,7 +1698,7 @@ func rewriteValueLOONG64_OpLOONG64MOVBUload(v *Value) bool {
+ 		return true
+ 	}
+ 	// match: (MOVBUload [off1] {sym1} (MOVVaddr [off2] {sym2} ptr) mem)
+-	// cond: canMergeSym(sym1,sym2) && is32Bit(int64(off1)+int64(off2))
++	// cond: canMergeSym(sym1,sym2) && is32Bit(int64(off1)+int64(off2)) && (ptr.Op != OpSB || !config.ctxt.Flag_dynlink)
+ 	// result: (MOVBUload [off1+int32(off2)] {mergeSym(sym1,sym2)} ptr mem)
+ 	for {
+ 		off1 := auxIntToInt32(v.AuxInt)
+@@ -1708,7 +1710,7 @@ func rewriteValueLOONG64_OpLOONG64MOVBUload(v *Value) bool {
+ 		sym2 := auxToSym(v_0.Aux)
+ 		ptr := v_0.Args[0]
+ 		mem := v_1
+-		if !(canMergeSym(sym1, sym2) && is32Bit(int64(off1)+int64(off2))) {
++		if !(canMergeSym(sym1, sym2) && is32Bit(int64(off1)+int64(off2)) && (ptr.Op != OpSB || !config.ctxt.Flag_dynlink)) {
+ 			break
+ 		}
+ 		v.reset(OpLOONG64MOVBUload)
+@@ -1759,8 +1761,10 @@ func rewriteValueLOONG64_OpLOONG64MOVBUreg(v *Value) bool {
+ func rewriteValueLOONG64_OpLOONG64MOVBload(v *Value) bool {
+ 	v_1 := v.Args[1]
+ 	v_0 := v.Args[0]
++	b := v.Block
++	config := b.Func.Config
+ 	// match: (MOVBload [off1] {sym} (ADDVconst [off2] ptr) mem)
+-	// cond: is32Bit(int64(off1)+off2)
++	// cond: is32Bit(int64(off1)+off2) && (ptr.Op != OpSB || !config.ctxt.Flag_dynlink)
+ 	// result: (MOVBload [off1+int32(off2)] {sym} ptr mem)
+ 	for {
+ 		off1 := auxIntToInt32(v.AuxInt)
+@@ -1771,7 +1775,7 @@ func rewriteValueLOONG64_OpLOONG64MOVBload(v *Value) bool {
+ 		off2 := auxIntToInt64(v_0.AuxInt)
+ 		ptr := v_0.Args[0]
+ 		mem := v_1
+-		if !(is32Bit(int64(off1) + off2)) {
++		if !(is32Bit(int64(off1)+off2) && (ptr.Op != OpSB || !config.ctxt.Flag_dynlink)) {
+ 			break
+ 		}
+ 		v.reset(OpLOONG64MOVBload)
+@@ -1781,7 +1785,7 @@ func rewriteValueLOONG64_OpLOONG64MOVBload(v *Value) bool {
+ 		return true
+ 	}
+ 	// match: (MOVBload [off1] {sym1} (MOVVaddr [off2] {sym2} ptr) mem)
+-	// cond: canMergeSym(sym1,sym2) && is32Bit(int64(off1)+int64(off2))
++	// cond: canMergeSym(sym1,sym2) && is32Bit(int64(off1)+int64(off2)) && (ptr.Op != OpSB || !config.ctxt.Flag_dynlink)
+ 	// result: (MOVBload [off1+int32(off2)] {mergeSym(sym1,sym2)} ptr mem)
+ 	for {
+ 		off1 := auxIntToInt32(v.AuxInt)
+@@ -1793,7 +1797,7 @@ func rewriteValueLOONG64_OpLOONG64MOVBload(v *Value) bool {
+ 		sym2 := auxToSym(v_0.Aux)
+ 		ptr := v_0.Args[0]
+ 		mem := v_1
+-		if !(canMergeSym(sym1, sym2) && is32Bit(int64(off1)+int64(off2))) {
++		if !(canMergeSym(sym1, sym2) && is32Bit(int64(off1)+int64(off2)) && (ptr.Op != OpSB || !config.ctxt.Flag_dynlink)) {
+ 			break
+ 		}
+ 		v.reset(OpLOONG64MOVBload)
+@@ -1845,8 +1849,10 @@ func rewriteValueLOONG64_OpLOONG64MOVBstore(v *Value) bool {
+ 	v_2 := v.Args[2]
+ 	v_1 := v.Args[1]
+ 	v_0 := v.Args[0]
++	b := v.Block
++	config := b.Func.Config
+ 	// match: (MOVBstore [off1] {sym} (ADDVconst [off2] ptr) val mem)
+-	// cond: is32Bit(int64(off1)+off2)
++	// cond: is32Bit(int64(off1)+off2) && (ptr.Op != OpSB || !config.ctxt.Flag_dynlink)
+ 	// result: (MOVBstore [off1+int32(off2)] {sym} ptr val mem)
+ 	for {
+ 		off1 := auxIntToInt32(v.AuxInt)
+@@ -1858,7 +1864,7 @@ func rewriteValueLOONG64_OpLOONG64MOVBstore(v *Value) bool {
+ 		ptr := v_0.Args[0]
+ 		val := v_1
+ 		mem := v_2
+-		if !(is32Bit(int64(off1) + off2)) {
++		if !(is32Bit(int64(off1)+off2) && (ptr.Op != OpSB || !config.ctxt.Flag_dynlink)) {
+ 			break
+ 		}
+ 		v.reset(OpLOONG64MOVBstore)
+@@ -1868,7 +1874,7 @@ func rewriteValueLOONG64_OpLOONG64MOVBstore(v *Value) bool {
+ 		return true
+ 	}
+ 	// match: (MOVBstore [off1] {sym1} (MOVVaddr [off2] {sym2} ptr) val mem)
+-	// cond: canMergeSym(sym1,sym2) && is32Bit(int64(off1)+int64(off2))
++	// cond: canMergeSym(sym1,sym2) && is32Bit(int64(off1)+int64(off2)) && (ptr.Op != OpSB || !config.ctxt.Flag_dynlink)
+ 	// result: (MOVBstore [off1+int32(off2)] {mergeSym(sym1,sym2)} ptr val mem)
+ 	for {
+ 		off1 := auxIntToInt32(v.AuxInt)
+@@ -1881,7 +1887,7 @@ func rewriteValueLOONG64_OpLOONG64MOVBstore(v *Value) bool {
+ 		ptr := v_0.Args[0]
+ 		val := v_1
+ 		mem := v_2
+-		if !(canMergeSym(sym1, sym2) && is32Bit(int64(off1)+int64(off2))) {
++		if !(canMergeSym(sym1, sym2) && is32Bit(int64(off1)+int64(off2)) && (ptr.Op != OpSB || !config.ctxt.Flag_dynlink)) {
+ 			break
+ 		}
+ 		v.reset(OpLOONG64MOVBstore)
+@@ -1997,8 +2003,10 @@ func rewriteValueLOONG64_OpLOONG64MOVBstore(v *Value) bool {
+ func rewriteValueLOONG64_OpLOONG64MOVBstorezero(v *Value) bool {
+ 	v_1 := v.Args[1]
+ 	v_0 := v.Args[0]
++	b := v.Block
++	config := b.Func.Config
+ 	// match: (MOVBstorezero [off1] {sym} (ADDVconst [off2] ptr) mem)
+-	// cond: is32Bit(int64(off1)+off2)
++	// cond: is32Bit(int64(off1)+off2) && (ptr.Op != OpSB || !config.ctxt.Flag_dynlink)
+ 	// result: (MOVBstorezero [off1+int32(off2)] {sym} ptr mem)
+ 	for {
+ 		off1 := auxIntToInt32(v.AuxInt)
+@@ -2009,7 +2017,7 @@ func rewriteValueLOONG64_OpLOONG64MOVBstorezero(v *Value) bool {
+ 		off2 := auxIntToInt64(v_0.AuxInt)
+ 		ptr := v_0.Args[0]
+ 		mem := v_1
+-		if !(is32Bit(int64(off1) + off2)) {
++		if !(is32Bit(int64(off1)+off2) && (ptr.Op != OpSB || !config.ctxt.Flag_dynlink)) {
+ 			break
+ 		}
+ 		v.reset(OpLOONG64MOVBstorezero)
+@@ -2019,7 +2027,7 @@ func rewriteValueLOONG64_OpLOONG64MOVBstorezero(v *Value) bool {
+ 		return true
+ 	}
+ 	// match: (MOVBstorezero [off1] {sym1} (MOVVaddr [off2] {sym2} ptr) mem)
+-	// cond: canMergeSym(sym1,sym2) && is32Bit(int64(off1)+int64(off2))
++	// cond: canMergeSym(sym1,sym2) && is32Bit(int64(off1)+int64(off2)) && (ptr.Op != OpSB || !config.ctxt.Flag_dynlink)
+ 	// result: (MOVBstorezero [off1+int32(off2)] {mergeSym(sym1,sym2)} ptr mem)
+ 	for {
+ 		off1 := auxIntToInt32(v.AuxInt)
+@@ -2031,7 +2039,7 @@ func rewriteValueLOONG64_OpLOONG64MOVBstorezero(v *Value) bool {
+ 		sym2 := auxToSym(v_0.Aux)
+ 		ptr := v_0.Args[0]
+ 		mem := v_1
+-		if !(canMergeSym(sym1, sym2) && is32Bit(int64(off1)+int64(off2))) {
++		if !(canMergeSym(sym1, sym2) && is32Bit(int64(off1)+int64(off2)) && (ptr.Op != OpSB || !config.ctxt.Flag_dynlink)) {
+ 			break
+ 		}
+ 		v.reset(OpLOONG64MOVBstorezero)
+@@ -2045,8 +2053,10 @@ func rewriteValueLOONG64_OpLOONG64MOVBstorezero(v *Value) bool {
+ func rewriteValueLOONG64_OpLOONG64MOVDload(v *Value) bool {
+ 	v_1 := v.Args[1]
+ 	v_0 := v.Args[0]
++	b := v.Block
++	config := b.Func.Config
+ 	// match: (MOVDload [off1] {sym} (ADDVconst [off2] ptr) mem)
+-	// cond: is32Bit(int64(off1)+off2)
++	// cond: is32Bit(int64(off1)+off2) && (ptr.Op != OpSB || !config.ctxt.Flag_dynlink)
+ 	// result: (MOVDload [off1+int32(off2)] {sym} ptr mem)
+ 	for {
+ 		off1 := auxIntToInt32(v.AuxInt)
+@@ -2057,7 +2067,7 @@ func rewriteValueLOONG64_OpLOONG64MOVDload(v *Value) bool {
+ 		off2 := auxIntToInt64(v_0.AuxInt)
+ 		ptr := v_0.Args[0]
+ 		mem := v_1
+-		if !(is32Bit(int64(off1) + off2)) {
++		if !(is32Bit(int64(off1)+off2) && (ptr.Op != OpSB || !config.ctxt.Flag_dynlink)) {
+ 			break
+ 		}
+ 		v.reset(OpLOONG64MOVDload)
+@@ -2067,7 +2077,7 @@ func rewriteValueLOONG64_OpLOONG64MOVDload(v *Value) bool {
+ 		return true
+ 	}
+ 	// match: (MOVDload [off1] {sym1} (MOVVaddr [off2] {sym2} ptr) mem)
+-	// cond: canMergeSym(sym1,sym2) && is32Bit(int64(off1)+int64(off2))
++	// cond: canMergeSym(sym1,sym2) && is32Bit(int64(off1)+int64(off2)) && (ptr.Op != OpSB || !config.ctxt.Flag_dynlink)
+ 	// result: (MOVDload [off1+int32(off2)] {mergeSym(sym1,sym2)} ptr mem)
+ 	for {
+ 		off1 := auxIntToInt32(v.AuxInt)
+@@ -2079,7 +2089,7 @@ func rewriteValueLOONG64_OpLOONG64MOVDload(v *Value) bool {
+ 		sym2 := auxToSym(v_0.Aux)
+ 		ptr := v_0.Args[0]
+ 		mem := v_1
+-		if !(canMergeSym(sym1, sym2) && is32Bit(int64(off1)+int64(off2))) {
++		if !(canMergeSym(sym1, sym2) && is32Bit(int64(off1)+int64(off2)) && (ptr.Op != OpSB || !config.ctxt.Flag_dynlink)) {
+ 			break
+ 		}
+ 		v.reset(OpLOONG64MOVDload)
+@@ -2094,8 +2104,10 @@ func rewriteValueLOONG64_OpLOONG64MOVDstore(v *Value) bool {
+ 	v_2 := v.Args[2]
+ 	v_1 := v.Args[1]
+ 	v_0 := v.Args[0]
++	b := v.Block
++	config := b.Func.Config
+ 	// match: (MOVDstore [off1] {sym} (ADDVconst [off2] ptr) val mem)
+-	// cond: is32Bit(int64(off1)+off2)
++	// cond: is32Bit(int64(off1)+off2) && (ptr.Op != OpSB || !config.ctxt.Flag_dynlink)
+ 	// result: (MOVDstore [off1+int32(off2)] {sym} ptr val mem)
+ 	for {
+ 		off1 := auxIntToInt32(v.AuxInt)
+@@ -2107,7 +2119,7 @@ func rewriteValueLOONG64_OpLOONG64MOVDstore(v *Value) bool {
+ 		ptr := v_0.Args[0]
+ 		val := v_1
+ 		mem := v_2
+-		if !(is32Bit(int64(off1) + off2)) {
++		if !(is32Bit(int64(off1)+off2) && (ptr.Op != OpSB || !config.ctxt.Flag_dynlink)) {
+ 			break
+ 		}
+ 		v.reset(OpLOONG64MOVDstore)
+@@ -2117,7 +2129,7 @@ func rewriteValueLOONG64_OpLOONG64MOVDstore(v *Value) bool {
+ 		return true
+ 	}
+ 	// match: (MOVDstore [off1] {sym1} (MOVVaddr [off2] {sym2} ptr) val mem)
+-	// cond: canMergeSym(sym1,sym2) && is32Bit(int64(off1)+int64(off2))
++	// cond: canMergeSym(sym1,sym2) && is32Bit(int64(off1)+int64(off2)) && (ptr.Op != OpSB || !config.ctxt.Flag_dynlink)
+ 	// result: (MOVDstore [off1+int32(off2)] {mergeSym(sym1,sym2)} ptr val mem)
+ 	for {
+ 		off1 := auxIntToInt32(v.AuxInt)
+@@ -2130,7 +2142,7 @@ func rewriteValueLOONG64_OpLOONG64MOVDstore(v *Value) bool {
+ 		ptr := v_0.Args[0]
+ 		val := v_1
+ 		mem := v_2
+-		if !(canMergeSym(sym1, sym2) && is32Bit(int64(off1)+int64(off2))) {
++		if !(canMergeSym(sym1, sym2) && is32Bit(int64(off1)+int64(off2)) && (ptr.Op != OpSB || !config.ctxt.Flag_dynlink)) {
+ 			break
+ 		}
+ 		v.reset(OpLOONG64MOVDstore)
+@@ -2144,8 +2156,10 @@ func rewriteValueLOONG64_OpLOONG64MOVDstore(v *Value) bool {
+ func rewriteValueLOONG64_OpLOONG64MOVFload(v *Value) bool {
+ 	v_1 := v.Args[1]
+ 	v_0 := v.Args[0]
++	b := v.Block
++	config := b.Func.Config
+ 	// match: (MOVFload [off1] {sym} (ADDVconst [off2] ptr) mem)
+-	// cond: is32Bit(int64(off1)+off2)
++	// cond: is32Bit(int64(off1)+off2) && (ptr.Op != OpSB || !config.ctxt.Flag_dynlink)
+ 	// result: (MOVFload [off1+int32(off2)] {sym} ptr mem)
+ 	for {
+ 		off1 := auxIntToInt32(v.AuxInt)
+@@ -2156,7 +2170,7 @@ func rewriteValueLOONG64_OpLOONG64MOVFload(v *Value) bool {
+ 		off2 := auxIntToInt64(v_0.AuxInt)
+ 		ptr := v_0.Args[0]
+ 		mem := v_1
+-		if !(is32Bit(int64(off1) + off2)) {
++		if !(is32Bit(int64(off1)+off2) && (ptr.Op != OpSB || !config.ctxt.Flag_dynlink)) {
+ 			break
+ 		}
+ 		v.reset(OpLOONG64MOVFload)
+@@ -2166,7 +2180,7 @@ func rewriteValueLOONG64_OpLOONG64MOVFload(v *Value) bool {
+ 		return true
+ 	}
+ 	// match: (MOVFload [off1] {sym1} (MOVVaddr [off2] {sym2} ptr) mem)
+-	// cond: canMergeSym(sym1,sym2) && is32Bit(int64(off1)+int64(off2))
++	// cond: canMergeSym(sym1,sym2) && is32Bit(int64(off1)+int64(off2)) && (ptr.Op != OpSB || !config.ctxt.Flag_dynlink)
+ 	// result: (MOVFload [off1+int32(off2)] {mergeSym(sym1,sym2)} ptr mem)
+ 	for {
+ 		off1 := auxIntToInt32(v.AuxInt)
+@@ -2178,7 +2192,7 @@ func rewriteValueLOONG64_OpLOONG64MOVFload(v *Value) bool {
+ 		sym2 := auxToSym(v_0.Aux)
+ 		ptr := v_0.Args[0]
+ 		mem := v_1
+-		if !(canMergeSym(sym1, sym2) && is32Bit(int64(off1)+int64(off2))) {
++		if !(canMergeSym(sym1, sym2) && is32Bit(int64(off1)+int64(off2)) && (ptr.Op != OpSB || !config.ctxt.Flag_dynlink)) {
+ 			break
+ 		}
+ 		v.reset(OpLOONG64MOVFload)
+@@ -2193,8 +2207,10 @@ func rewriteValueLOONG64_OpLOONG64MOVFstore(v *Value) bool {
+ 	v_2 := v.Args[2]
+ 	v_1 := v.Args[1]
+ 	v_0 := v.Args[0]
++	b := v.Block
++	config := b.Func.Config
+ 	// match: (MOVFstore [off1] {sym} (ADDVconst [off2] ptr) val mem)
+-	// cond: is32Bit(int64(off1)+off2)
++	// cond: is32Bit(int64(off1)+off2) && (ptr.Op != OpSB || !config.ctxt.Flag_dynlink)
+ 	// result: (MOVFstore [off1+int32(off2)] {sym} ptr val mem)
+ 	for {
+ 		off1 := auxIntToInt32(v.AuxInt)
+@@ -2206,7 +2222,7 @@ func rewriteValueLOONG64_OpLOONG64MOVFstore(v *Value) bool {
+ 		ptr := v_0.Args[0]
+ 		val := v_1
+ 		mem := v_2
+-		if !(is32Bit(int64(off1) + off2)) {
++		if !(is32Bit(int64(off1)+off2) && (ptr.Op != OpSB || !config.ctxt.Flag_dynlink)) {
+ 			break
+ 		}
+ 		v.reset(OpLOONG64MOVFstore)
+@@ -2216,7 +2232,7 @@ func rewriteValueLOONG64_OpLOONG64MOVFstore(v *Value) bool {
+ 		return true
+ 	}
+ 	// match: (MOVFstore [off1] {sym1} (MOVVaddr [off2] {sym2} ptr) val mem)
+-	// cond: canMergeSym(sym1,sym2) && is32Bit(int64(off1)+int64(off2))
++	// cond: canMergeSym(sym1,sym2) && is32Bit(int64(off1)+int64(off2)) && (ptr.Op != OpSB || !config.ctxt.Flag_dynlink)
+ 	// result: (MOVFstore [off1+int32(off2)] {mergeSym(sym1,sym2)} ptr val mem)
+ 	for {
+ 		off1 := auxIntToInt32(v.AuxInt)
+@@ -2229,7 +2245,7 @@ func rewriteValueLOONG64_OpLOONG64MOVFstore(v *Value) bool {
+ 		ptr := v_0.Args[0]
+ 		val := v_1
+ 		mem := v_2
+-		if !(canMergeSym(sym1, sym2) && is32Bit(int64(off1)+int64(off2))) {
++		if !(canMergeSym(sym1, sym2) && is32Bit(int64(off1)+int64(off2)) && (ptr.Op != OpSB || !config.ctxt.Flag_dynlink)) {
+ 			break
+ 		}
+ 		v.reset(OpLOONG64MOVFstore)
+@@ -2243,8 +2259,10 @@ func rewriteValueLOONG64_OpLOONG64MOVFstore(v *Value) bool {
+ func rewriteValueLOONG64_OpLOONG64MOVHUload(v *Value) bool {
+ 	v_1 := v.Args[1]
+ 	v_0 := v.Args[0]
++	b := v.Block
++	config := b.Func.Config
+ 	// match: (MOVHUload [off1] {sym} (ADDVconst [off2] ptr) mem)
+-	// cond: is32Bit(int64(off1)+off2)
++	// cond: is32Bit(int64(off1)+off2) && (ptr.Op != OpSB || !config.ctxt.Flag_dynlink)
+ 	// result: (MOVHUload [off1+int32(off2)] {sym} ptr mem)
+ 	for {
+ 		off1 := auxIntToInt32(v.AuxInt)
+@@ -2255,7 +2273,7 @@ func rewriteValueLOONG64_OpLOONG64MOVHUload(v *Value) bool {
+ 		off2 := auxIntToInt64(v_0.AuxInt)
+ 		ptr := v_0.Args[0]
+ 		mem := v_1
+-		if !(is32Bit(int64(off1) + off2)) {
++		if !(is32Bit(int64(off1)+off2) && (ptr.Op != OpSB || !config.ctxt.Flag_dynlink)) {
+ 			break
+ 		}
+ 		v.reset(OpLOONG64MOVHUload)
+@@ -2265,7 +2283,7 @@ func rewriteValueLOONG64_OpLOONG64MOVHUload(v *Value) bool {
+ 		return true
+ 	}
+ 	// match: (MOVHUload [off1] {sym1} (MOVVaddr [off2] {sym2} ptr) mem)
+-	// cond: canMergeSym(sym1,sym2) && is32Bit(int64(off1)+int64(off2))
++	// cond: canMergeSym(sym1,sym2) && is32Bit(int64(off1)+int64(off2)) && (ptr.Op != OpSB || !config.ctxt.Flag_dynlink)
+ 	// result: (MOVHUload [off1+int32(off2)] {mergeSym(sym1,sym2)} ptr mem)
+ 	for {
+ 		off1 := auxIntToInt32(v.AuxInt)
+@@ -2277,7 +2295,7 @@ func rewriteValueLOONG64_OpLOONG64MOVHUload(v *Value) bool {
+ 		sym2 := auxToSym(v_0.Aux)
+ 		ptr := v_0.Args[0]
+ 		mem := v_1
+-		if !(canMergeSym(sym1, sym2) && is32Bit(int64(off1)+int64(off2))) {
++		if !(canMergeSym(sym1, sym2) && is32Bit(int64(off1)+int64(off2)) && (ptr.Op != OpSB || !config.ctxt.Flag_dynlink)) {
+ 			break
+ 		}
+ 		v.reset(OpLOONG64MOVHUload)
+@@ -2350,8 +2368,10 @@ func rewriteValueLOONG64_OpLOONG64MOVHUreg(v *Value) bool {
+ func rewriteValueLOONG64_OpLOONG64MOVHload(v *Value) bool {
+ 	v_1 := v.Args[1]
+ 	v_0 := v.Args[0]
++	b := v.Block
++	config := b.Func.Config
+ 	// match: (MOVHload [off1] {sym} (ADDVconst [off2] ptr) mem)
+-	// cond: is32Bit(int64(off1)+off2)
++	// cond: is32Bit(int64(off1)+off2) && (ptr.Op != OpSB || !config.ctxt.Flag_dynlink)
+ 	// result: (MOVHload [off1+int32(off2)] {sym} ptr mem)
+ 	for {
+ 		off1 := auxIntToInt32(v.AuxInt)
+@@ -2362,7 +2382,7 @@ func rewriteValueLOONG64_OpLOONG64MOVHload(v *Value) bool {
+ 		off2 := auxIntToInt64(v_0.AuxInt)
+ 		ptr := v_0.Args[0]
+ 		mem := v_1
+-		if !(is32Bit(int64(off1) + off2)) {
++		if !(is32Bit(int64(off1)+off2) && (ptr.Op != OpSB || !config.ctxt.Flag_dynlink)) {
+ 			break
+ 		}
+ 		v.reset(OpLOONG64MOVHload)
+@@ -2372,7 +2392,7 @@ func rewriteValueLOONG64_OpLOONG64MOVHload(v *Value) bool {
+ 		return true
+ 	}
+ 	// match: (MOVHload [off1] {sym1} (MOVVaddr [off2] {sym2} ptr) mem)
+-	// cond: canMergeSym(sym1,sym2) && is32Bit(int64(off1)+int64(off2))
++	// cond: canMergeSym(sym1,sym2) && is32Bit(int64(off1)+int64(off2)) && (ptr.Op != OpSB || !config.ctxt.Flag_dynlink)
+ 	// result: (MOVHload [off1+int32(off2)] {mergeSym(sym1,sym2)} ptr mem)
+ 	for {
+ 		off1 := auxIntToInt32(v.AuxInt)
+@@ -2384,7 +2404,7 @@ func rewriteValueLOONG64_OpLOONG64MOVHload(v *Value) bool {
+ 		sym2 := auxToSym(v_0.Aux)
+ 		ptr := v_0.Args[0]
+ 		mem := v_1
+-		if !(canMergeSym(sym1, sym2) && is32Bit(int64(off1)+int64(off2))) {
++		if !(canMergeSym(sym1, sym2) && is32Bit(int64(off1)+int64(off2)) && (ptr.Op != OpSB || !config.ctxt.Flag_dynlink)) {
+ 			break
+ 		}
+ 		v.reset(OpLOONG64MOVHload)
+@@ -2480,8 +2500,10 @@ func rewriteValueLOONG64_OpLOONG64MOVHstore(v *Value) bool {
+ 	v_2 := v.Args[2]
+ 	v_1 := v.Args[1]
+ 	v_0 := v.Args[0]
++	b := v.Block
++	config := b.Func.Config
+ 	// match: (MOVHstore [off1] {sym} (ADDVconst [off2] ptr) val mem)
+-	// cond: is32Bit(int64(off1)+off2)
++	// cond: is32Bit(int64(off1)+off2) && (ptr.Op != OpSB || !config.ctxt.Flag_dynlink)
+ 	// result: (MOVHstore [off1+int32(off2)] {sym} ptr val mem)
+ 	for {
+ 		off1 := auxIntToInt32(v.AuxInt)
+@@ -2493,7 +2515,7 @@ func rewriteValueLOONG64_OpLOONG64MOVHstore(v *Value) bool {
+ 		ptr := v_0.Args[0]
+ 		val := v_1
+ 		mem := v_2
+-		if !(is32Bit(int64(off1) + off2)) {
++		if !(is32Bit(int64(off1)+off2) && (ptr.Op != OpSB || !config.ctxt.Flag_dynlink)) {
+ 			break
+ 		}
+ 		v.reset(OpLOONG64MOVHstore)
+@@ -2503,7 +2525,7 @@ func rewriteValueLOONG64_OpLOONG64MOVHstore(v *Value) bool {
+ 		return true
+ 	}
+ 	// match: (MOVHstore [off1] {sym1} (MOVVaddr [off2] {sym2} ptr) val mem)
+-	// cond: canMergeSym(sym1,sym2) && is32Bit(int64(off1)+int64(off2))
++	// cond: canMergeSym(sym1,sym2) && is32Bit(int64(off1)+int64(off2)) && (ptr.Op != OpSB || !config.ctxt.Flag_dynlink)
+ 	// result: (MOVHstore [off1+int32(off2)] {mergeSym(sym1,sym2)} ptr val mem)
+ 	for {
+ 		off1 := auxIntToInt32(v.AuxInt)
+@@ -2516,7 +2538,7 @@ func rewriteValueLOONG64_OpLOONG64MOVHstore(v *Value) bool {
+ 		ptr := v_0.Args[0]
+ 		val := v_1
+ 		mem := v_2
+-		if !(canMergeSym(sym1, sym2) && is32Bit(int64(off1)+int64(off2))) {
++		if !(canMergeSym(sym1, sym2) && is32Bit(int64(off1)+int64(off2)) && (ptr.Op != OpSB || !config.ctxt.Flag_dynlink)) {
+ 			break
+ 		}
+ 		v.reset(OpLOONG64MOVHstore)
+@@ -2598,8 +2620,10 @@ func rewriteValueLOONG64_OpLOONG64MOVHstore(v *Value) bool {
+ func rewriteValueLOONG64_OpLOONG64MOVHstorezero(v *Value) bool {
+ 	v_1 := v.Args[1]
+ 	v_0 := v.Args[0]
++	b := v.Block
++	config := b.Func.Config
+ 	// match: (MOVHstorezero [off1] {sym} (ADDVconst [off2] ptr) mem)
+-	// cond: is32Bit(int64(off1)+off2)
++	// cond: is32Bit(int64(off1)+off2) && (ptr.Op != OpSB || !config.ctxt.Flag_dynlink)
+ 	// result: (MOVHstorezero [off1+int32(off2)] {sym} ptr mem)
+ 	for {
+ 		off1 := auxIntToInt32(v.AuxInt)
+@@ -2610,7 +2634,7 @@ func rewriteValueLOONG64_OpLOONG64MOVHstorezero(v *Value) bool {
+ 		off2 := auxIntToInt64(v_0.AuxInt)
+ 		ptr := v_0.Args[0]
+ 		mem := v_1
+-		if !(is32Bit(int64(off1) + off2)) {
++		if !(is32Bit(int64(off1)+off2) && (ptr.Op != OpSB || !config.ctxt.Flag_dynlink)) {
+ 			break
+ 		}
+ 		v.reset(OpLOONG64MOVHstorezero)
+@@ -2620,7 +2644,7 @@ func rewriteValueLOONG64_OpLOONG64MOVHstorezero(v *Value) bool {
+ 		return true
+ 	}
+ 	// match: (MOVHstorezero [off1] {sym1} (MOVVaddr [off2] {sym2} ptr) mem)
+-	// cond: canMergeSym(sym1,sym2) && is32Bit(int64(off1)+int64(off2))
++	// cond: canMergeSym(sym1,sym2) && is32Bit(int64(off1)+int64(off2)) && (ptr.Op != OpSB || !config.ctxt.Flag_dynlink)
+ 	// result: (MOVHstorezero [off1+int32(off2)] {mergeSym(sym1,sym2)} ptr mem)
+ 	for {
+ 		off1 := auxIntToInt32(v.AuxInt)
+@@ -2632,7 +2656,7 @@ func rewriteValueLOONG64_OpLOONG64MOVHstorezero(v *Value) bool {
+ 		sym2 := auxToSym(v_0.Aux)
+ 		ptr := v_0.Args[0]
+ 		mem := v_1
+-		if !(canMergeSym(sym1, sym2) && is32Bit(int64(off1)+int64(off2))) {
++		if !(canMergeSym(sym1, sym2) && is32Bit(int64(off1)+int64(off2)) && (ptr.Op != OpSB || !config.ctxt.Flag_dynlink)) {
+ 			break
+ 		}
+ 		v.reset(OpLOONG64MOVHstorezero)
+@@ -2646,8 +2670,10 @@ func rewriteValueLOONG64_OpLOONG64MOVHstorezero(v *Value) bool {
+ func rewriteValueLOONG64_OpLOONG64MOVVload(v *Value) bool {
+ 	v_1 := v.Args[1]
+ 	v_0 := v.Args[0]
++	b := v.Block
++	config := b.Func.Config
+ 	// match: (MOVVload [off1] {sym} (ADDVconst [off2] ptr) mem)
+-	// cond: is32Bit(int64(off1)+off2)
++	// cond: is32Bit(int64(off1)+off2) && (ptr.Op != OpSB || !config.ctxt.Flag_dynlink)
+ 	// result: (MOVVload [off1+int32(off2)] {sym} ptr mem)
+ 	for {
+ 		off1 := auxIntToInt32(v.AuxInt)
+@@ -2658,7 +2684,7 @@ func rewriteValueLOONG64_OpLOONG64MOVVload(v *Value) bool {
+ 		off2 := auxIntToInt64(v_0.AuxInt)
+ 		ptr := v_0.Args[0]
+ 		mem := v_1
+-		if !(is32Bit(int64(off1) + off2)) {
++		if !(is32Bit(int64(off1)+off2) && (ptr.Op != OpSB || !config.ctxt.Flag_dynlink)) {
+ 			break
+ 		}
+ 		v.reset(OpLOONG64MOVVload)
+@@ -2668,7 +2694,7 @@ func rewriteValueLOONG64_OpLOONG64MOVVload(v *Value) bool {
+ 		return true
+ 	}
+ 	// match: (MOVVload [off1] {sym1} (MOVVaddr [off2] {sym2} ptr) mem)
+-	// cond: canMergeSym(sym1,sym2) && is32Bit(int64(off1)+int64(off2))
++	// cond: canMergeSym(sym1,sym2) && is32Bit(int64(off1)+int64(off2)) && (ptr.Op != OpSB || !config.ctxt.Flag_dynlink)
+ 	// result: (MOVVload [off1+int32(off2)] {mergeSym(sym1,sym2)} ptr mem)
+ 	for {
+ 		off1 := auxIntToInt32(v.AuxInt)
+@@ -2680,7 +2706,7 @@ func rewriteValueLOONG64_OpLOONG64MOVVload(v *Value) bool {
+ 		sym2 := auxToSym(v_0.Aux)
+ 		ptr := v_0.Args[0]
+ 		mem := v_1
+-		if !(canMergeSym(sym1, sym2) && is32Bit(int64(off1)+int64(off2))) {
++		if !(canMergeSym(sym1, sym2) && is32Bit(int64(off1)+int64(off2)) && (ptr.Op != OpSB || !config.ctxt.Flag_dynlink)) {
+ 			break
+ 		}
+ 		v.reset(OpLOONG64MOVVload)
+@@ -2722,8 +2748,10 @@ func rewriteValueLOONG64_OpLOONG64MOVVstore(v *Value) bool {
+ 	v_2 := v.Args[2]
+ 	v_1 := v.Args[1]
+ 	v_0 := v.Args[0]
++	b := v.Block
++	config := b.Func.Config
+ 	// match: (MOVVstore [off1] {sym} (ADDVconst [off2] ptr) val mem)
+-	// cond: is32Bit(int64(off1)+off2)
++	// cond: is32Bit(int64(off1)+off2) && (ptr.Op != OpSB || !config.ctxt.Flag_dynlink)
+ 	// result: (MOVVstore [off1+int32(off2)] {sym} ptr val mem)
+ 	for {
+ 		off1 := auxIntToInt32(v.AuxInt)
+@@ -2735,7 +2763,7 @@ func rewriteValueLOONG64_OpLOONG64MOVVstore(v *Value) bool {
+ 		ptr := v_0.Args[0]
+ 		val := v_1
+ 		mem := v_2
+-		if !(is32Bit(int64(off1) + off2)) {
++		if !(is32Bit(int64(off1)+off2) && (ptr.Op != OpSB || !config.ctxt.Flag_dynlink)) {
+ 			break
+ 		}
+ 		v.reset(OpLOONG64MOVVstore)
+@@ -2745,7 +2773,7 @@ func rewriteValueLOONG64_OpLOONG64MOVVstore(v *Value) bool {
+ 		return true
+ 	}
+ 	// match: (MOVVstore [off1] {sym1} (MOVVaddr [off2] {sym2} ptr) val mem)
+-	// cond: canMergeSym(sym1,sym2) && is32Bit(int64(off1)+int64(off2))
++	// cond: canMergeSym(sym1,sym2) && is32Bit(int64(off1)+int64(off2)) && (ptr.Op != OpSB || !config.ctxt.Flag_dynlink)
+ 	// result: (MOVVstore [off1+int32(off2)] {mergeSym(sym1,sym2)} ptr val mem)
+ 	for {
+ 		off1 := auxIntToInt32(v.AuxInt)
+@@ -2758,7 +2786,7 @@ func rewriteValueLOONG64_OpLOONG64MOVVstore(v *Value) bool {
+ 		ptr := v_0.Args[0]
+ 		val := v_1
+ 		mem := v_2
+-		if !(canMergeSym(sym1, sym2) && is32Bit(int64(off1)+int64(off2))) {
++		if !(canMergeSym(sym1, sym2) && is32Bit(int64(off1)+int64(off2)) && (ptr.Op != OpSB || !config.ctxt.Flag_dynlink)) {
+ 			break
+ 		}
+ 		v.reset(OpLOONG64MOVVstore)
+@@ -2772,8 +2800,10 @@ func rewriteValueLOONG64_OpLOONG64MOVVstore(v *Value) bool {
+ func rewriteValueLOONG64_OpLOONG64MOVVstorezero(v *Value) bool {
+ 	v_1 := v.Args[1]
+ 	v_0 := v.Args[0]
++	b := v.Block
++	config := b.Func.Config
+ 	// match: (MOVVstorezero [off1] {sym} (ADDVconst [off2] ptr) mem)
+-	// cond: is32Bit(int64(off1)+off2)
++	// cond: is32Bit(int64(off1)+off2) && (ptr.Op != OpSB || !config.ctxt.Flag_dynlink)
+ 	// result: (MOVVstorezero [off1+int32(off2)] {sym} ptr mem)
+ 	for {
+ 		off1 := auxIntToInt32(v.AuxInt)
+@@ -2784,7 +2814,7 @@ func rewriteValueLOONG64_OpLOONG64MOVVstorezero(v *Value) bool {
+ 		off2 := auxIntToInt64(v_0.AuxInt)
+ 		ptr := v_0.Args[0]
+ 		mem := v_1
+-		if !(is32Bit(int64(off1) + off2)) {
++		if !(is32Bit(int64(off1)+off2) && (ptr.Op != OpSB || !config.ctxt.Flag_dynlink)) {
+ 			break
+ 		}
+ 		v.reset(OpLOONG64MOVVstorezero)
+@@ -2794,7 +2824,7 @@ func rewriteValueLOONG64_OpLOONG64MOVVstorezero(v *Value) bool {
+ 		return true
+ 	}
+ 	// match: (MOVVstorezero [off1] {sym1} (MOVVaddr [off2] {sym2} ptr) mem)
+-	// cond: canMergeSym(sym1,sym2) && is32Bit(int64(off1)+int64(off2))
++	// cond: canMergeSym(sym1,sym2) && is32Bit(int64(off1)+int64(off2)) && (ptr.Op != OpSB || !config.ctxt.Flag_dynlink)
+ 	// result: (MOVVstorezero [off1+int32(off2)] {mergeSym(sym1,sym2)} ptr mem)
+ 	for {
+ 		off1 := auxIntToInt32(v.AuxInt)
+@@ -2806,7 +2836,7 @@ func rewriteValueLOONG64_OpLOONG64MOVVstorezero(v *Value) bool {
+ 		sym2 := auxToSym(v_0.Aux)
+ 		ptr := v_0.Args[0]
+ 		mem := v_1
+-		if !(canMergeSym(sym1, sym2) && is32Bit(int64(off1)+int64(off2))) {
++		if !(canMergeSym(sym1, sym2) && is32Bit(int64(off1)+int64(off2)) && (ptr.Op != OpSB || !config.ctxt.Flag_dynlink)) {
+ 			break
+ 		}
+ 		v.reset(OpLOONG64MOVVstorezero)
+@@ -2820,8 +2850,10 @@ func rewriteValueLOONG64_OpLOONG64MOVVstorezero(v *Value) bool {
+ func rewriteValueLOONG64_OpLOONG64MOVWUload(v *Value) bool {
+ 	v_1 := v.Args[1]
+ 	v_0 := v.Args[0]
++	b := v.Block
++	config := b.Func.Config
+ 	// match: (MOVWUload [off1] {sym} (ADDVconst [off2] ptr) mem)
+-	// cond: is32Bit(int64(off1)+off2)
++	// cond: is32Bit(int64(off1)+off2) && (ptr.Op != OpSB || !config.ctxt.Flag_dynlink)
+ 	// result: (MOVWUload [off1+int32(off2)] {sym} ptr mem)
+ 	for {
+ 		off1 := auxIntToInt32(v.AuxInt)
+@@ -2832,7 +2864,7 @@ func rewriteValueLOONG64_OpLOONG64MOVWUload(v *Value) bool {
+ 		off2 := auxIntToInt64(v_0.AuxInt)
+ 		ptr := v_0.Args[0]
+ 		mem := v_1
+-		if !(is32Bit(int64(off1) + off2)) {
++		if !(is32Bit(int64(off1)+off2) && (ptr.Op != OpSB || !config.ctxt.Flag_dynlink)) {
+ 			break
+ 		}
+ 		v.reset(OpLOONG64MOVWUload)
+@@ -2842,7 +2874,7 @@ func rewriteValueLOONG64_OpLOONG64MOVWUload(v *Value) bool {
+ 		return true
+ 	}
+ 	// match: (MOVWUload [off1] {sym1} (MOVVaddr [off2] {sym2} ptr) mem)
+-	// cond: canMergeSym(sym1,sym2) && is32Bit(int64(off1)+int64(off2))
++	// cond: canMergeSym(sym1,sym2) && is32Bit(int64(off1)+int64(off2)) && (ptr.Op != OpSB || !config.ctxt.Flag_dynlink)
+ 	// result: (MOVWUload [off1+int32(off2)] {mergeSym(sym1,sym2)} ptr mem)
+ 	for {
+ 		off1 := auxIntToInt32(v.AuxInt)
+@@ -2854,7 +2886,7 @@ func rewriteValueLOONG64_OpLOONG64MOVWUload(v *Value) bool {
+ 		sym2 := auxToSym(v_0.Aux)
+ 		ptr := v_0.Args[0]
+ 		mem := v_1
+-		if !(canMergeSym(sym1, sym2) && is32Bit(int64(off1)+int64(off2))) {
++		if !(canMergeSym(sym1, sym2) && is32Bit(int64(off1)+int64(off2)) && (ptr.Op != OpSB || !config.ctxt.Flag_dynlink)) {
+ 			break
+ 		}
+ 		v.reset(OpLOONG64MOVWUload)
+@@ -2949,8 +2981,10 @@ func rewriteValueLOONG64_OpLOONG64MOVWUreg(v *Value) bool {
+ func rewriteValueLOONG64_OpLOONG64MOVWload(v *Value) bool {
+ 	v_1 := v.Args[1]
+ 	v_0 := v.Args[0]
++	b := v.Block
++	config := b.Func.Config
+ 	// match: (MOVWload [off1] {sym} (ADDVconst [off2] ptr) mem)
+-	// cond: is32Bit(int64(off1)+off2)
++	// cond: is32Bit(int64(off1)+off2) && (ptr.Op != OpSB || !config.ctxt.Flag_dynlink)
+ 	// result: (MOVWload [off1+int32(off2)] {sym} ptr mem)
+ 	for {
+ 		off1 := auxIntToInt32(v.AuxInt)
+@@ -2961,7 +2995,7 @@ func rewriteValueLOONG64_OpLOONG64MOVWload(v *Value) bool {
+ 		off2 := auxIntToInt64(v_0.AuxInt)
+ 		ptr := v_0.Args[0]
+ 		mem := v_1
+-		if !(is32Bit(int64(off1) + off2)) {
++		if !(is32Bit(int64(off1)+off2) && (ptr.Op != OpSB || !config.ctxt.Flag_dynlink)) {
+ 			break
+ 		}
+ 		v.reset(OpLOONG64MOVWload)
+@@ -2971,7 +3005,7 @@ func rewriteValueLOONG64_OpLOONG64MOVWload(v *Value) bool {
+ 		return true
+ 	}
+ 	// match: (MOVWload [off1] {sym1} (MOVVaddr [off2] {sym2} ptr) mem)
+-	// cond: canMergeSym(sym1,sym2) && is32Bit(int64(off1)+int64(off2))
++	// cond: canMergeSym(sym1,sym2) && is32Bit(int64(off1)+int64(off2)) && (ptr.Op != OpSB || !config.ctxt.Flag_dynlink)
+ 	// result: (MOVWload [off1+int32(off2)] {mergeSym(sym1,sym2)} ptr mem)
+ 	for {
+ 		off1 := auxIntToInt32(v.AuxInt)
+@@ -2983,7 +3017,7 @@ func rewriteValueLOONG64_OpLOONG64MOVWload(v *Value) bool {
+ 		sym2 := auxToSym(v_0.Aux)
+ 		ptr := v_0.Args[0]
+ 		mem := v_1
+-		if !(canMergeSym(sym1, sym2) && is32Bit(int64(off1)+int64(off2))) {
++		if !(canMergeSym(sym1, sym2) && is32Bit(int64(off1)+int64(off2)) && (ptr.Op != OpSB || !config.ctxt.Flag_dynlink)) {
+ 			break
+ 		}
+ 		v.reset(OpLOONG64MOVWload)
+@@ -3112,8 +3146,10 @@ func rewriteValueLOONG64_OpLOONG64MOVWstore(v *Value) bool {
+ 	v_2 := v.Args[2]
+ 	v_1 := v.Args[1]
+ 	v_0 := v.Args[0]
++	b := v.Block
++	config := b.Func.Config
+ 	// match: (MOVWstore [off1] {sym} (ADDVconst [off2] ptr) val mem)
+-	// cond: is32Bit(int64(off1)+off2)
++	// cond: is32Bit(int64(off1)+off2) && (ptr.Op != OpSB || !config.ctxt.Flag_dynlink)
+ 	// result: (MOVWstore [off1+int32(off2)] {sym} ptr val mem)
+ 	for {
+ 		off1 := auxIntToInt32(v.AuxInt)
+@@ -3125,7 +3161,7 @@ func rewriteValueLOONG64_OpLOONG64MOVWstore(v *Value) bool {
+ 		ptr := v_0.Args[0]
+ 		val := v_1
+ 		mem := v_2
+-		if !(is32Bit(int64(off1) + off2)) {
++		if !(is32Bit(int64(off1)+off2) && (ptr.Op != OpSB || !config.ctxt.Flag_dynlink)) {
+ 			break
+ 		}
+ 		v.reset(OpLOONG64MOVWstore)
+@@ -3135,7 +3171,7 @@ func rewriteValueLOONG64_OpLOONG64MOVWstore(v *Value) bool {
+ 		return true
+ 	}
+ 	// match: (MOVWstore [off1] {sym1} (MOVVaddr [off2] {sym2} ptr) val mem)
+-	// cond: canMergeSym(sym1,sym2) && is32Bit(int64(off1)+int64(off2))
++	// cond: canMergeSym(sym1,sym2) && is32Bit(int64(off1)+int64(off2)) && (ptr.Op != OpSB || !config.ctxt.Flag_dynlink)
+ 	// result: (MOVWstore [off1+int32(off2)] {mergeSym(sym1,sym2)} ptr val mem)
+ 	for {
+ 		off1 := auxIntToInt32(v.AuxInt)
+@@ -3148,7 +3184,7 @@ func rewriteValueLOONG64_OpLOONG64MOVWstore(v *Value) bool {
+ 		ptr := v_0.Args[0]
+ 		val := v_1
+ 		mem := v_2
+-		if !(canMergeSym(sym1, sym2) && is32Bit(int64(off1)+int64(off2))) {
++		if !(canMergeSym(sym1, sym2) && is32Bit(int64(off1)+int64(off2)) && (ptr.Op != OpSB || !config.ctxt.Flag_dynlink)) {
+ 			break
+ 		}
+ 		v.reset(OpLOONG64MOVWstore)
+@@ -3196,8 +3232,10 @@ func rewriteValueLOONG64_OpLOONG64MOVWstore(v *Value) bool {
+ func rewriteValueLOONG64_OpLOONG64MOVWstorezero(v *Value) bool {
+ 	v_1 := v.Args[1]
+ 	v_0 := v.Args[0]
++	b := v.Block
++	config := b.Func.Config
+ 	// match: (MOVWstorezero [off1] {sym} (ADDVconst [off2] ptr) mem)
+-	// cond: is32Bit(int64(off1)+off2)
++	// cond: is32Bit(int64(off1)+off2) && (ptr.Op != OpSB || !config.ctxt.Flag_dynlink)
+ 	// result: (MOVWstorezero [off1+int32(off2)] {sym} ptr mem)
+ 	for {
+ 		off1 := auxIntToInt32(v.AuxInt)
+@@ -3208,7 +3246,7 @@ func rewriteValueLOONG64_OpLOONG64MOVWstorezero(v *Value) bool {
+ 		off2 := auxIntToInt64(v_0.AuxInt)
+ 		ptr := v_0.Args[0]
+ 		mem := v_1
+-		if !(is32Bit(int64(off1) + off2)) {
++		if !(is32Bit(int64(off1)+off2) && (ptr.Op != OpSB || !config.ctxt.Flag_dynlink)) {
+ 			break
+ 		}
+ 		v.reset(OpLOONG64MOVWstorezero)
+@@ -3218,7 +3256,7 @@ func rewriteValueLOONG64_OpLOONG64MOVWstorezero(v *Value) bool {
+ 		return true
+ 	}
+ 	// match: (MOVWstorezero [off1] {sym1} (MOVVaddr [off2] {sym2} ptr) mem)
+-	// cond: canMergeSym(sym1,sym2) && is32Bit(int64(off1)+int64(off2))
++	// cond: canMergeSym(sym1,sym2) && is32Bit(int64(off1)+int64(off2)) && (ptr.Op != OpSB || !config.ctxt.Flag_dynlink)
+ 	// result: (MOVWstorezero [off1+int32(off2)] {mergeSym(sym1,sym2)} ptr mem)
+ 	for {
+ 		off1 := auxIntToInt32(v.AuxInt)
+@@ -3230,7 +3268,7 @@ func rewriteValueLOONG64_OpLOONG64MOVWstorezero(v *Value) bool {
+ 		sym2 := auxToSym(v_0.Aux)
+ 		ptr := v_0.Args[0]
+ 		mem := v_1
+-		if !(canMergeSym(sym1, sym2) && is32Bit(int64(off1)+int64(off2))) {
++		if !(canMergeSym(sym1, sym2) && is32Bit(int64(off1)+int64(off2)) && (ptr.Op != OpSB || !config.ctxt.Flag_dynlink)) {
+ 			break
+ 		}
+ 		v.reset(OpLOONG64MOVWstorezero)
+diff --git a/src/cmd/internal/obj/loong64/a.out.go b/src/cmd/internal/obj/loong64/a.out.go
+index 99a7da388f..9527e99b56 100644
+--- a/src/cmd/internal/obj/loong64/a.out.go
++++ b/src/cmd/internal/obj/loong64/a.out.go
+@@ -227,6 +227,7 @@ const (
+ 	C_ADDR
+ 	C_TLS_LE
+ 	C_TLS_IE
++	C_GOTADDR
+ 	C_TEXTSIZE
+ 
+ 	C_NCLASS // must be the last
+diff --git a/src/cmd/internal/obj/loong64/asm.go b/src/cmd/internal/obj/loong64/asm.go
+index eff60104ce..17c0539972 100644
+--- a/src/cmd/internal/obj/loong64/asm.go
++++ b/src/cmd/internal/obj/loong64/asm.go
+@@ -344,6 +344,8 @@ var optab = []Optab{
+ 	{AMOVBU, C_TLS_IE, C_NONE, C_REG, C_NONE, 57, 16, 0, sys.Loong64, 0},
+ 	{AMOVWU, C_TLS_IE, C_NONE, C_REG, C_NONE, 57, 16, 0, sys.Loong64, 0},
+ 
++	{AMOVV, C_GOTADDR, C_NONE, C_REG, C_NONE, 65, 8, 0, sys.Loong64, 0},
++
+ 	{ATEQ, C_SCON, C_REG, C_REG, C_NONE, 15, 8, 0, 0, 0},
+ 	{ATEQ, C_SCON, C_NONE, C_REG, C_NONE, 15, 8, 0, 0, 0},
+ 
+@@ -601,6 +603,9 @@ func (c *ctxt0) aclass(a *obj.Addr) int {
+ 				return C_SOREG
+ 			}
+ 			return C_LOREG
++
++		case obj.NAME_GOTREF:
++			return C_GOTADDR
+ 		}
+ 
+ 		return C_GOK
+@@ -1615,38 +1620,38 @@ func (c *ctxt0) asmout(p *obj.Prog, o *Optab, out []uint32) {
+ 
+ 	case 56: // mov r, tlsvar IE model ==> (pcalau12i + ld.d)tlsvar@got + add.d + st.d
+ 		o1 = OP_IR(c.opir(APCALAU12I), uint32(0), uint32(REGTMP))
+-                rel := obj.Addrel(c.cursym)
+-                rel.Off = int32(c.pc)
+-                rel.Siz = 4
+-                rel.Sym = p.To.Sym
+-                rel.Add = 0x0
+-                rel.Type = objabi.R_LOONG64_TLS_IE_PCREL_HI
++		rel := obj.Addrel(c.cursym)
++		rel.Off = int32(c.pc)
++		rel.Siz = 4
++		rel.Sym = p.To.Sym
++		rel.Add = 0x0
++		rel.Type = objabi.R_LOONG64_TLS_IE_PCREL_HI
+ 		o2 = OP_12IRR(c.opirr(-p.As), uint32(0), uint32(REGTMP), uint32(REGTMP))
+-                rel2 := obj.Addrel(c.cursym)
+-                rel2.Off = int32(c.pc + 4)
+-                rel2.Siz = 4
+-                rel2.Sym = p.To.Sym
+-                rel2.Add = 0x0
+-                rel2.Type = objabi.R_LOONG64_TLS_IE_LO
++		rel2 := obj.Addrel(c.cursym)
++		rel2.Off = int32(c.pc + 4)
++		rel2.Siz = 4
++		rel2.Sym = p.To.Sym
++		rel2.Add = 0x0
++		rel2.Type = objabi.R_LOONG64_TLS_IE_LO
+ 		o3 = OP_RRR(c.oprrr(AADDVU), uint32(REGTMP), uint32(REG_R2), uint32(REGTMP))
+ 		o4 = OP_12IRR(c.opirr(p.As), uint32(0), uint32(REGTMP), uint32(p.From.Reg))
+ 
+ 	case 57: // mov tlsvar, r IE model ==> (pcalau12i + ld.d)tlsvar@got + add.d + ld.d
+-                o1 = OP_IR(c.opir(APCALAU12I), uint32(0), uint32(REGTMP))
+-                rel := obj.Addrel(c.cursym)
+-                rel.Off = int32(c.pc)
+-                rel.Siz = 4
+-                rel.Sym = p.From.Sym
+-                rel.Add = 0x0
+-                rel.Type = objabi.R_LOONG64_TLS_IE_PCREL_HI
+-                o2 = OP_12IRR(c.opirr(-p.As), uint32(0), uint32(REGTMP), uint32(REGTMP))
+-                rel2 := obj.Addrel(c.cursym)
+-                rel2.Off = int32(c.pc + 4)
+-                rel2.Siz = 4
+-                rel2.Sym = p.From.Sym
+-                rel2.Add = 0x0
+-                rel2.Type = objabi.R_LOONG64_TLS_IE_LO
+-                o3 = OP_RRR(c.oprrr(AADDVU), uint32(REGTMP), uint32(REG_R2), uint32(REGTMP))
++		o1 = OP_IR(c.opir(APCALAU12I), uint32(0), uint32(REGTMP))
++		rel := obj.Addrel(c.cursym)
++		rel.Off = int32(c.pc)
++		rel.Siz = 4
++		rel.Sym = p.From.Sym
++		rel.Add = 0x0
++		rel.Type = objabi.R_LOONG64_TLS_IE_PCREL_HI
++		o2 = OP_12IRR(c.opirr(-p.As), uint32(0), uint32(REGTMP), uint32(REGTMP))
++		rel2 := obj.Addrel(c.cursym)
++		rel2.Off = int32(c.pc + 4)
++		rel2.Siz = 4
++		rel2.Sym = p.From.Sym
++		rel2.Add = 0x0
++		rel2.Type = objabi.R_LOONG64_TLS_IE_LO
++		o3 = OP_RRR(c.oprrr(AADDVU), uint32(REGTMP), uint32(REG_R2), uint32(REGTMP))
+ 		o4 = OP_12IRR(c.opirr(-p.As), uint32(0), uint32(REGTMP), uint32(p.To.Reg))
+ 
+ 	case 59: // mov $dcon,r
+@@ -1682,6 +1687,22 @@ func (c *ctxt0) asmout(p *obj.Prog, o *Optab, out []uint32) {
+ 	case 64: // movv c_reg, c_fcc0 ==> movgr2cf cd, rj
+ 		a := OP_TEN(8, 1334)
+ 		o1 = OP_RR(a, uint32(p.From.Reg), uint32(p.To.Reg))
++
++	case 65: // mov sym@GOT, r ==> pcaddu12i + ld.d
++		o1 = OP_IR(c.opir(APCALAU12I), uint32(0), uint32(p.To.Reg))
++		rel := obj.Addrel(c.cursym)
++		rel.Off = int32(c.pc)
++		rel.Siz = 4
++		rel.Sym = p.From.Sym
++		rel.Type = objabi.R_LOONG64_GOTPCREL_HI
++		rel.Add = 0x0
++		o2 = OP_12IRR(c.opirr(-p.As), uint32(0), uint32(p.To.Reg), uint32(p.To.Reg))
++		rel2 := obj.Addrel(c.cursym)
++		rel2.Off = int32(c.pc + 4)
++		rel2.Siz = 4
++		rel2.Sym = p.From.Sym
++		rel2.Type = objabi.R_LOONG64_GOT_LO
++		rel2.Add = 0x0
+ 	}
+ 
+ 	out[0] = o1
+diff --git a/src/cmd/internal/obj/loong64/cnames.go b/src/cmd/internal/obj/loong64/cnames.go
+index 8b8af6ba31..94b1b54c93 100644
+--- a/src/cmd/internal/obj/loong64/cnames.go
++++ b/src/cmd/internal/obj/loong64/cnames.go
+@@ -39,6 +39,7 @@ var cnames0 = []string{
+ 	"ADDR",
+ 	"TLS_LE",
+ 	"TLS_IE",
++	"GOTADDR",
+ 	"TEXTSIZE",
+ 	"NCLASS",
+ }
+diff --git a/src/cmd/internal/obj/loong64/obj.go b/src/cmd/internal/obj/loong64/obj.go
+index 0c1f5c029d..5d7213d8c7 100644
+--- a/src/cmd/internal/obj/loong64/obj.go
++++ b/src/cmd/internal/obj/loong64/obj.go
+@@ -84,6 +84,122 @@ func progedit(ctxt *obj.Link, p *obj.Prog, newprog obj.ProgAlloc) {
+ 			p.As = AADDVU
+ 		}
+ 	}
++
++	if ctxt.Flag_dynlink {
++		rewriteToUseGot(ctxt, p, newprog)
++	}
++}
++
++func rewriteToUseGot(ctxt *obj.Link, p *obj.Prog, newprog obj.ProgAlloc) {
++	//     ADUFFxxx $offset
++	// becomes
++	//     MOVV runtime.duffxxx@GOT, REGTMP
++	//     ADD $offset, REGTMP
++	//     JAL REGTMP
++	if p.As == obj.ADUFFCOPY || p.As == obj.ADUFFZERO {
++		var sym *obj.LSym
++		if p.As == obj.ADUFFZERO {
++			sym = ctxt.Lookup("runtime.duffzero")
++		} else {
++			sym = ctxt.Lookup("runtime.duffcopy")
++		}
++		offset := p.To.Offset
++		p.As = AMOVV
++		p.From.Type = obj.TYPE_MEM
++		p.From.Sym = sym
++		p.From.Name = obj.NAME_GOTREF
++		p.To.Type = obj.TYPE_REG
++		p.To.Reg = REGTMP
++		p.To.Name = obj.NAME_NONE
++		p.To.Offset = 0
++		p.To.Sym = nil
++		p1 := obj.Appendp(p, newprog)
++		p1.As = AADDV
++		p1.From.Type = obj.TYPE_CONST
++		p1.From.Offset = offset
++		p1.To.Type = obj.TYPE_REG
++		p1.To.Reg = REGTMP
++		p2 := obj.Appendp(p1, newprog)
++		p2.As = AJAL
++		p2.To.Type = obj.TYPE_MEM
++		p2.To.Reg = REGTMP
++	}
++
++	// We only care about global data: NAME_EXTERN means a global
++	// symbol in the Go sense, and p.Sym.Local is true for a few
++	// internally defined symbols.
++	if p.From.Type == obj.TYPE_ADDR && p.From.Name == obj.NAME_EXTERN && !p.From.Sym.Local() {
++		// MOVV $sym, Rx becomes MOVV sym@GOT, Rx
++		// MOVV $sym+<off>, Rx becomes MOVV sym@GOT, Rx; ADD <off>, Rx
++		if p.As != AMOVV {
++			ctxt.Diag("do not know how to handle TYPE_ADDR in %v with -shared", p)
++		}
++		if p.To.Type != obj.TYPE_REG {
++			ctxt.Diag("do not know how to handle LEAQ-type insn to non-register in %v with -shared", p)
++		}
++		p.From.Type = obj.TYPE_MEM
++		p.From.Name = obj.NAME_GOTREF
++		if p.From.Offset != 0 {
++			q := obj.Appendp(p, newprog)
++			q.As = AADDV
++			q.From.Type = obj.TYPE_CONST
++			q.From.Offset = p.From.Offset
++			q.To = p.To
++			p.From.Offset = 0
++		}
++	}
++	if p.GetFrom3() != nil && p.GetFrom3().Name == obj.NAME_EXTERN {
++		ctxt.Diag("don't know how to handle %v with -shared", p)
++	}
++
++	var source *obj.Addr
++	// MOVx sym, Ry becomes MOVV sym@GOT, REGTMP; MOVx (REGTMP), Ry
++	// MOVx Ry, sym becomes MOVV sym@GOT, REGTMP; MOVx Ry, (REGTMP)
++	// An addition may be inserted between the two MOVs if there is an offset.
++	if p.From.Name == obj.NAME_EXTERN && !p.From.Sym.Local() {
++		if p.To.Name == obj.NAME_EXTERN && !p.To.Sym.Local() {
++			ctxt.Diag("cannot handle NAME_EXTERN on both sides in %v with -shared", p)
++		}
++		source = &p.From
++	} else if p.To.Name == obj.NAME_EXTERN && !p.To.Sym.Local() {
++		source = &p.To
++	} else {
++		return
++	}
++	if p.As == obj.ATEXT || p.As == obj.AFUNCDATA || p.As == obj.ACALL || p.As == obj.ARET || p.As == obj.AJMP {
++		return
++	}
++	if source.Sym.Type == objabi.STLSBSS {
++		return
++	}
++	if source.Type != obj.TYPE_MEM {
++		ctxt.Diag("don't know how to handle %v with -shared", p)
++	}
++	p1 := obj.Appendp(p, newprog)
++	p2 := obj.Appendp(p1, newprog)
++	p1.As = AMOVV
++	p1.From.Type = obj.TYPE_MEM
++	p1.From.Sym = source.Sym
++	p1.From.Name = obj.NAME_GOTREF
++	p1.To.Type = obj.TYPE_REG
++	p1.To.Reg = REGTMP
++
++	p2.As = p.As
++	p2.From = p.From
++	p2.To = p.To
++	if p.From.Name == obj.NAME_EXTERN {
++		p2.From.Reg = REGTMP
++		p2.From.Name = obj.NAME_NONE
++		p2.From.Sym = nil
++	} else if p.To.Name == obj.NAME_EXTERN {
++		p2.To.Reg = REGTMP
++		p2.To.Name = obj.NAME_NONE
++		p2.To.Sym = nil
++	} else {
++		return
++	}
++	obj.Nopout(p)
++
+ }
+ 
+ func preprocess(ctxt *obj.Link, cursym *obj.LSym, newprog obj.ProgAlloc) {
+diff --git a/src/cmd/internal/objabi/reloctype.go b/src/cmd/internal/objabi/reloctype.go
+index 1a6a73fe12..aaefd15663 100644
+--- a/src/cmd/internal/objabi/reloctype.go
++++ b/src/cmd/internal/objabi/reloctype.go
+@@ -315,6 +315,11 @@ const (
+ 	R_LOONG64_TLS_IE_PCREL_HI
+ 	R_LOONG64_TLS_IE_LO
+ 
++	// R_LOONG64_GOTPCREL_HI and R_LOONG64_GOT_LO relocates an pcalau12i, ld.d pair to compute
++	// the address of the GOT slot of the referenced symbol.
++	R_LOONG64_GOTPCREL_HI
++	R_LOONG64_GOT_LO
++
+ 	// R_JMPLOONG64 resolves to non-PC-relative target address of a JMP instruction,
+ 	// by encoding the address into the instruction.
+ 	R_JMPLOONG64
+diff --git a/src/cmd/internal/objabi/reloctype_string.go b/src/cmd/internal/objabi/reloctype_string.go
+index 8cfff5ae8c..53104c76b3 100644
+--- a/src/cmd/internal/objabi/reloctype_string.go
++++ b/src/cmd/internal/objabi/reloctype_string.go
+@@ -1,4 +1,4 @@
+-// Code generated by "stringer -type=RelocType cmd/internal/objabi/reloctype.go"; DO NOT EDIT.
++// Code generated by "stringer -type=RelocType"; DO NOT EDIT.
+ 
+ package objabi
+ 
+@@ -81,17 +81,19 @@ func _() {
+ 	_ = x[R_CALLLOONG64-71]
+ 	_ = x[R_LOONG64_TLS_IE_PCREL_HI-72]
+ 	_ = x[R_LOONG64_TLS_IE_LO-73]
+-	_ = x[R_JMPLOONG64-74]
+-	_ = x[R_ADDRMIPSU-75]
+-	_ = x[R_ADDRMIPSTLS-76]
+-	_ = x[R_ADDRCUOFF-77]
+-	_ = x[R_WASMIMPORT-78]
+-	_ = x[R_XCOFFREF-79]
++	_ = x[R_LOONG64_GOTPCREL_HI-74]
++	_ = x[R_LOONG64_GOT_LO-75]
++	_ = x[R_JMPLOONG64-76]
++	_ = x[R_ADDRMIPSU-77]
++	_ = x[R_ADDRMIPSTLS-78]
++	_ = x[R_ADDRCUOFF-79]
++	_ = x[R_WASMIMPORT-80]
++	_ = x[R_XCOFFREF-81]
+ }
+ 
+-const _RelocType_name = "R_ADDRR_ADDRPOWERR_ADDRARM64R_ADDRMIPSR_ADDROFFR_SIZER_CALLR_CALLARMR_CALLARM64R_CALLINDR_CALLPOWERR_CALLMIPSR_CONSTR_PCRELR_TLS_LER_TLS_IER_GOTOFFR_PLT0R_PLT1R_PLT2R_USEFIELDR_USETYPER_USEIFACER_USEIFACEMETHODR_USEGENERICIFACEMETHODR_METHODOFFR_KEEPR_POWER_TOCR_GOTPCRELR_JMPMIPSR_DWARFSECREFR_DWARFFILEREFR_ARM64_TLS_LER_ARM64_TLS_IER_ARM64_GOTPCRELR_ARM64_GOTR_ARM64_PCRELR_ARM64_PCREL_LDST8R_ARM64_PCREL_LDST16R_ARM64_PCREL_LDST32R_ARM64_PCREL_LDST64R_ARM64_LDST8R_ARM64_LDST16R_ARM64_LDST32R_ARM64_LDST64R_ARM64_LDST128R_POWER_TLS_LER_POWER_TLS_IER_POWER_TLSR_POWER_TLS_IE_PCREL34R_POWER_TLS_LE_TPREL34R_ADDRPOWER_DSR_ADDRPOWER_GOTR_ADDRPOWER_GOT_PCREL34R_ADDRPOWER_PCRELR_ADDRPOWER_TOCRELR_ADDRPOWER_TOCREL_DSR_ADDRPOWER_D34R_ADDRPOWER_PCREL34R_RISCV_CALLR_RISCV_CALL_TRAMPR_RISCV_PCREL_ITYPER_RISCV_PCREL_STYPER_RISCV_TLS_IE_ITYPER_RISCV_TLS_IE_STYPER_PCRELDBLR_ADDRLOONG64R_ADDRLOONG64UR_ADDRLOONG64TLSR_ADDRLOONG64TLSUR_CALLLOONG64R_LOONG64_TLS_IE_PCREL_HIR_LOONG64_TLS_IE_LOR_JMPLOONG64R_ADDRMIPSUR_ADDRMIPSTLSR_ADDRCUOFFR_WASMIMPORTR_XCOFFREF"
++const _RelocType_name = "R_ADDRR_ADDRPOWERR_ADDRARM64R_ADDRMIPSR_ADDROFFR_SIZER_CALLR_CALLARMR_CALLARM64R_CALLINDR_CALLPOWERR_CALLMIPSR_CONSTR_PCRELR_TLS_LER_TLS_IER_GOTOFFR_PLT0R_PLT1R_PLT2R_USEFIELDR_USETYPER_USEIFACER_USEIFACEMETHODR_USEGENERICIFACEMETHODR_METHODOFFR_KEEPR_POWER_TOCR_GOTPCRELR_JMPMIPSR_DWARFSECREFR_DWARFFILEREFR_ARM64_TLS_LER_ARM64_TLS_IER_ARM64_GOTPCRELR_ARM64_GOTR_ARM64_PCRELR_ARM64_PCREL_LDST8R_ARM64_PCREL_LDST16R_ARM64_PCREL_LDST32R_ARM64_PCREL_LDST64R_ARM64_LDST8R_ARM64_LDST16R_ARM64_LDST32R_ARM64_LDST64R_ARM64_LDST128R_POWER_TLS_LER_POWER_TLS_IER_POWER_TLSR_POWER_TLS_IE_PCREL34R_POWER_TLS_LE_TPREL34R_ADDRPOWER_DSR_ADDRPOWER_GOTR_ADDRPOWER_GOT_PCREL34R_ADDRPOWER_PCRELR_ADDRPOWER_TOCRELR_ADDRPOWER_TOCREL_DSR_ADDRPOWER_D34R_ADDRPOWER_PCREL34R_RISCV_CALLR_RISCV_CALL_TRAMPR_RISCV_PCREL_ITYPER_RISCV_PCREL_STYPER_RISCV_TLS_IE_ITYPER_RISCV_TLS_IE_STYPER_PCRELDBLR_ADDRLOONG64R_ADDRLOONG64UR_ADDRLOONG64TLSR_ADDRLOONG64TLSUR_CALLLOONG64R_LOONG64_TLS_IE_PCREL_HIR_LOONG64_TLS_IE_LOR_LOONG64_GOTPCREL_HIR_LOONG64_GOT_LOR_JMPLOONG64R_ADDRMIPSUR_ADDRMIPSTLSR_ADDRCUOFFR_WASMIMPORTR_XCOFFREF"
+ 
+-var _RelocType_index = [...]uint16{0, 6, 17, 28, 38, 47, 53, 59, 68, 79, 88, 99, 109, 116, 123, 131, 139, 147, 153, 159, 165, 175, 184, 194, 210, 233, 244, 250, 261, 271, 280, 293, 307, 321, 335, 351, 362, 375, 394, 414, 434, 454, 467, 481, 495, 509, 524, 538, 552, 563, 585, 607, 621, 636, 659, 676, 694, 715, 730, 749, 761, 779, 798, 817, 837, 857, 867, 880, 894, 910, 927, 940, 965, 984, 996, 1007, 1020, 1031, 1043, 1053}
++var _RelocType_index = [...]uint16{0, 6, 17, 28, 38, 47, 53, 59, 68, 79, 88, 99, 109, 116, 123, 131, 139, 147, 153, 159, 165, 175, 184, 194, 210, 233, 244, 250, 261, 271, 280, 293, 307, 321, 335, 351, 362, 375, 394, 414, 434, 454, 467, 481, 495, 509, 524, 538, 552, 563, 585, 607, 621, 636, 659, 676, 694, 715, 730, 749, 761, 779, 798, 817, 837, 857, 867, 880, 894, 910, 927, 940, 965, 984, 1005, 1021, 1033, 1044, 1057, 1068, 1080, 1090}
+ 
+ func (i RelocType) String() string {
+ 	i -= 1
+diff --git a/src/cmd/link/internal/ld/config.go b/src/cmd/link/internal/ld/config.go
+index de2926bab4..4496eecb8f 100644
+--- a/src/cmd/link/internal/ld/config.go
++++ b/src/cmd/link/internal/ld/config.go
+@@ -84,7 +84,7 @@ func (mode *BuildMode) Set(s string) error {
+ 		switch buildcfg.GOOS {
+ 		case "linux":
+ 			switch buildcfg.GOARCH {
+-			case "386", "amd64", "arm", "arm64", "ppc64le", "s390x":
++			case "386", "amd64", "arm", "arm64", "loong64", "ppc64le", "s390x":
+ 			default:
+ 				return badmode()
+ 			}
+diff --git a/src/cmd/link/internal/ld/lib.go b/src/cmd/link/internal/ld/lib.go
+index c0730179db..2f62ccc9a7 100644
+--- a/src/cmd/link/internal/ld/lib.go
++++ b/src/cmd/link/internal/ld/lib.go
+@@ -1777,6 +1777,12 @@ func (ctxt *Link) hostlink() {
+ 		argv = append(argv, peimporteddlls()...)
+ 	}
+ 
++	if ctxt.Arch.Family == sys.Loong64 {
++		if (ctxt.BuildMode != BuildModeShared) && ctxt.linkShared {
++			argv = append(argv, "-pie")
++		}
++	}
++
+ 	if ctxt.Debugvlog != 0 {
+ 		ctxt.Logf("host link:")
+ 		for _, v := range argv {
+diff --git a/src/cmd/link/internal/loong64/asm.go b/src/cmd/link/internal/loong64/asm.go
+index 2f760fd231..a4c48e64cd 100644
+--- a/src/cmd/link/internal/loong64/asm.go
++++ b/src/cmd/link/internal/loong64/asm.go
+@@ -14,7 +14,43 @@ import (
+ 	"log"
+ )
+ 
+-func gentext(ctxt *ld.Link, ldr *loader.Loader) {}
++func gentext(ctxt *ld.Link, ldr *loader.Loader) {
++	initfunc, addmoduledata := ld.PrepareAddmoduledata(ctxt)
++	if initfunc == nil {
++		return
++	}
++
++	o := func(op uint32) {
++		initfunc.AddUint32(ctxt.Arch, op)
++	}
++
++	// 0: pcalau12i r4, $0 <runtime.firstmoduledata>
++	//
++	//	0: R_ADDRLOONG64U
++	//
++	// 4: addi.d r4, r4, $0
++	//
++	//	4: R_ADDRLOONG64
++	o(0x1a000004)
++	rel, _ := initfunc.AddRel(objabi.R_ADDRLOONG64U)
++	rel.SetOff(0)
++	rel.SetSiz(4)
++	rel.SetSym(ctxt.Moduledata)
++	o(0x02c00084)
++	rel2, _ := initfunc.AddRel(objabi.R_ADDRLOONG64)
++	rel2.SetOff(4)
++	rel2.SetSiz(4)
++	rel2.SetSym(ctxt.Moduledata)
++
++	// 8: b $0 <runtime.addmoduledata>
++	//
++	//	8: R_CALLLOONG64
++	o(0x50000000)
++	rel3, _ := initfunc.AddRel(objabi.R_CALLLOONG64)
++	rel3.SetOff(8)
++	rel3.SetSiz(4)
++	rel3.SetSym(addmoduledata)
++}
+ 
+ func adddynrel(target *ld.Target, ldr *loader.Loader, syms *ld.ArchSyms, s loader.Sym, r loader.Reloc, rIdx int) bool {
+ 	log.Fatalf("adddynrel not implemented")
+@@ -69,6 +105,16 @@ func elfreloc1(ctxt *ld.Link, out *ld.OutBuf, ldr *loader.Loader, s loader.Sym,
+ 		out.Write64(uint64(elf.R_LARCH_TLS_IE_PC_LO12) | uint64(elfsym)<<32)
+ 		out.Write64(uint64(0x0))
+ 
++	case objabi.R_LOONG64_GOTPCREL_HI:
++		out.Write64(uint64(sectoff))
++		out.Write64(uint64(elf.R_LARCH_GOT_PC_HI20) | uint64(elfsym)<<32)
++		out.Write64(uint64(0x0))
++
++	case objabi.R_LOONG64_GOT_LO:
++		out.Write64(uint64(sectoff))
++		out.Write64(uint64(elf.R_LARCH_GOT_PC_LO12) | uint64(elfsym)<<32)
++		out.Write64(uint64(0x0))
++
+ 	// The pcaddu12i + addi.d instructions is used to obtain address of a symbol on Loong64.
+ 	// The low 12-bit of the symbol address need to be added. The addi.d instruction have
+ 	// signed 12-bit immediate operand. The 0x800 (addr+U12 <=> addr+0x800+S12) is introduced
+@@ -116,7 +162,9 @@ func archreloc(target *ld.Target, ldr *loader.Loader, syms *ld.ArchSyms, r loade
+ 			objabi.R_CALLLOONG64,
+ 			objabi.R_JMPLOONG64,
+ 			objabi.R_LOONG64_TLS_IE_PCREL_HI,
+-			objabi.R_LOONG64_TLS_IE_LO:
++			objabi.R_LOONG64_GOTPCREL_HI,
++			objabi.R_LOONG64_TLS_IE_LO,
++			objabi.R_LOONG64_GOT_LO:
+ 			return val, 1, true
+ 		}
+ 	}
+@@ -161,7 +209,10 @@ func archrelocvariant(*ld.Target, *loader.Loader, loader.Reloc, sym.RelocVariant
+ func extreloc(target *ld.Target, ldr *loader.Loader, r loader.Reloc, s loader.Sym) (loader.ExtReloc, bool) {
+ 	switch r.Type() {
+ 	case objabi.R_ADDRLOONG64,
+-		objabi.R_ADDRLOONG64U:
++		objabi.R_ADDRLOONG64U,
++		objabi.R_LOONG64_GOTPCREL_HI,
++		objabi.R_LOONG64_GOT_LO:
++
+ 		return ld.ExtrelocViaOuterSym(ldr, r, s), true
+ 
+ 	case objabi.R_ADDRLOONG64TLS,
+diff --git a/src/internal/platform/supported.go b/src/internal/platform/supported.go
+index f7c413cfec..3488af801c 100644
+--- a/src/internal/platform/supported.go
++++ b/src/internal/platform/supported.go
+@@ -136,7 +136,7 @@ func BuildModeSupported(compiler, buildmode, goos, goarch string) bool {
+ 
+ 	case "shared":
+ 		switch platform {
+-		case "linux/386", "linux/amd64", "linux/arm", "linux/arm64", "linux/ppc64le", "linux/s390x":
++		case "linux/386", "linux/amd64", "linux/arm", "linux/arm64", "linux/loong64", "linux/ppc64le", "linux/s390x":
+ 			return true
+ 		}
+ 		return false
+diff --git a/src/runtime/asm_loong64.s b/src/runtime/asm_loong64.s
+index 3921091fea..ba06203fa1 100644
+--- a/src/runtime/asm_loong64.s
++++ b/src/runtime/asm_loong64.s
+@@ -618,6 +618,16 @@ TEXT runtime·goexit(SB),NOSPLIT|NOFRAME|TOPFRAME,$0-0
+ 	// traceback from goexit1 must hit code range of goexit
+ 	NOR	R0, R0	// NOP
+ 
++TEXT runtime·addmoduledata(SB),NOSPLIT,$0-0
++	ADDV	$-16, R3
++	MOVV	R30, 8(R3)
++	MOVV	runtime·lastmoduledatap(SB), R5
++	MOVV	R4, moduledata_next(R5)
++	MOVV	R4, runtime·lastmoduledatap(SB)
++	MOVV	8(R3), R30
++	ADDV	$16, R3
++	RET
++
+ TEXT ·checkASM(SB),NOSPLIT,$0-1
+ 	MOVW	$1, R19
+ 	MOVB	R19, ret+0(FP)
+diff --git a/src/runtime/internal/atomic/atomic_loong64.s b/src/runtime/internal/atomic/atomic_loong64.s
+index 3d802beaa7..80ff980739 100644
+--- a/src/runtime/internal/atomic/atomic_loong64.s
++++ b/src/runtime/internal/atomic/atomic_loong64.s
+@@ -294,13 +294,13 @@ TEXT ·Loadp(SB),NOSPLIT|NOFRAME,$0-16
+ 
+ // uint32 runtime∕internal∕atomic·LoadAcq(uint32 volatile* ptr)
+ TEXT ·LoadAcq(SB),NOSPLIT|NOFRAME,$0-12
+-	JMP	atomic·Load(SB)
++	JMP	·Load(SB)
+ 
+ // uint64 ·LoadAcq64(uint64 volatile* ptr)
+ TEXT ·LoadAcq64(SB),NOSPLIT|NOFRAME,$0-16
+-	JMP	atomic·Load64(SB)
++	JMP	·Load64(SB)
+ 
+ // uintptr ·LoadAcquintptr(uintptr volatile* ptr)
+ TEXT ·LoadAcquintptr(SB),NOSPLIT|NOFRAME,$0-16
+-	JMP     atomic·Load64(SB)
++	JMP     ·Load64(SB)
+ 
+-- 
+2.40.0
+

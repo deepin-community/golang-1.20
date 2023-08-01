@@ -1,0 +1,141 @@
+From 890b96f7abd8ba5b2243959d9b49c212a0fc4d78 Mon Sep 17 00:00:00 2001
+From: Meng Zhuo <mzh@golangcn.org>
+Date: Tue, 11 Jul 2023 14:53:54 +0800
+Subject: [PATCH] cmd/asm, cmd/internal/obj: generate proper atomic ops for
+ riscv64
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Go's memory model closely follows the approach C++ concurrency memory
+model (https://go.dev/ref/mem) and Go atomic "has the same semantics as C++'s
+sequentially consistent atomics".
+
+Meanwhile according to RISCV manual A.6 "Mappings from C/C++ primitives to RISC-V primitives".
+C/C++ atomic operations (memory_order_acq_rel) should be map to "amo<op>.{w|d}.aqrl"
+LR/SC (memory_order_acq_rel) should map to "lr.{w|d}.aq; <op>; sc.{w|d}.rl"
+
+goos: linux
+goarch: riscv64
+pkg: runtime/internal/atomic
+                │ atomic.old.bench │          atomic.new.bench           │
+                │      sec/op      │   sec/op     vs base                │
+AtomicLoad64-4         4.216n ± 1%   4.202n ± 0%        ~ (p=0.127 n=10)
+AtomicStore64-4        5.040n ± 0%   6.718n ± 0%  +33.30% (p=0.000 n=10)
+AtomicLoad-4           4.217n ± 0%   4.213n ± 0%        ~ (p=0.145 n=10)
+AtomicStore-4          5.040n ± 0%   6.718n ± 0%  +33.30% (p=0.000 n=10)
+And8-4                 9.237n ± 0%   9.240n ± 0%        ~ (p=0.582 n=10)
+And-4                  5.878n ± 0%   6.719n ± 0%  +14.31% (p=0.000 n=10)
+And8Parallel-4         28.44n ± 0%   28.46n ± 0%   +0.07% (p=0.000 n=10)
+AndParallel-4          28.40n ± 0%   28.43n ± 0%   +0.11% (p=0.000 n=10)
+Or8-4                  8.399n ± 0%   8.398n ± 0%        ~ (p=0.357 n=10)
+Or-4                   5.879n ± 0%   6.718n ± 0%  +14.27% (p=0.000 n=10)
+Or8Parallel-4          28.43n ± 0%   28.45n ± 0%   +0.09% (p=0.000 n=10)
+OrParallel-4           28.40n ± 0%   28.43n ± 0%   +0.11% (p=0.000 n=10)
+Xadd-4                 30.05n ± 0%   30.10n ± 0%   +0.18% (p=0.000 n=10)
+Xadd64-4               30.05n ± 0%   30.09n ± 0%   +0.12% (p=0.000 n=10)
+Cas-4                  60.48n ± 0%   61.13n ± 0%   +1.08% (p=0.000 n=10)
+Cas64-4                62.28n ± 0%   62.34n ± 0%        ~ (p=0.810 n=10)
+Xchg-4                 30.05n ± 0%   30.09n ± 0%   +0.15% (p=0.000 n=10)
+Xchg64-4               30.05n ± 0%   30.09n ± 0%   +0.13% (p=0.000 n=10)
+geomean                15.42n        16.17n        +4.89%
+
+Fixes #61295
+
+Change-Id: I97b5325db50467eeec36fb079bded7b09a32330f
+Reviewed-on: https://go-review.googlesource.com/c/go/+/508715
+Reviewed-by: Austin Clements <austin@google.com>
+Reviewed-by: Joel Sing <joel@sing.id.au>
+Run-TryBot: M Zhuo <mzh@golangcn.org>
+Reviewed-by: Cherry Mui <cherryyz@google.com>
+Reviewed-by: Bryan Mills <bcmills@google.com>
+TryBot-Result: Gopher Robot <gobot@golang.org>
+---
+ src/cmd/asm/internal/asm/testdata/riscv64.s | 40 ++++++++++-----------
+ src/cmd/internal/obj/riscv/obj.go           | 13 ++++---
+ 2 files changed, 29 insertions(+), 24 deletions(-)
+
+diff --git a/src/cmd/asm/internal/asm/testdata/riscv64.s b/src/cmd/asm/internal/asm/testdata/riscv64.s
+index 6f303858b4b19..53538320f0dd5 100644
+--- a/src/cmd/asm/internal/asm/testdata/riscv64.s
++++ b/src/cmd/asm/internal/asm/testdata/riscv64.s
+@@ -183,28 +183,28 @@ start:
+ 	// 8.2: Load-Reserved/Store-Conditional
+ 	LRW	(X5), X6				// 2fa30214
+ 	LRD	(X5), X6				// 2fb30214
+-	SCW	X5, (X6), X7				// af23531c
+-	SCD	X5, (X6), X7				// af33531c
++	SCW	X5, (X6), X7				// af23531a
++	SCD	X5, (X6), X7				// af33531a
+ 
+ 	// 8.3: Atomic Memory Operations
+-	AMOSWAPW	X5, (X6), X7			// af23530c
+-	AMOSWAPD	X5, (X6), X7			// af33530c
+-	AMOADDW		X5, (X6), X7			// af235304
+-	AMOADDD		X5, (X6), X7			// af335304
+-	AMOANDW		X5, (X6), X7			// af235364
+-	AMOANDD		X5, (X6), X7			// af335364
+-	AMOORW		X5, (X6), X7			// af235344
+-	AMOORD		X5, (X6), X7			// af335344
+-	AMOXORW		X5, (X6), X7			// af235324
+-	AMOXORD		X5, (X6), X7			// af335324
+-	AMOMAXW		X5, (X6), X7			// af2353a4
+-	AMOMAXD		X5, (X6), X7			// af3353a4
+-	AMOMAXUW	X5, (X6), X7			// af2353e4
+-	AMOMAXUD	X5, (X6), X7			// af3353e4
+-	AMOMINW		X5, (X6), X7			// af235384
+-	AMOMIND		X5, (X6), X7			// af335384
+-	AMOMINUW	X5, (X6), X7			// af2353c4
+-	AMOMINUD	X5, (X6), X7			// af3353c4
++	AMOSWAPW	X5, (X6), X7			// af23530e
++	AMOSWAPD	X5, (X6), X7			// af33530e
++	AMOADDW		X5, (X6), X7			// af235306
++	AMOADDD		X5, (X6), X7			// af335306
++	AMOANDW		X5, (X6), X7			// af235366
++	AMOANDD		X5, (X6), X7			// af335366
++	AMOORW		X5, (X6), X7			// af235346
++	AMOORD		X5, (X6), X7			// af335346
++	AMOXORW		X5, (X6), X7			// af235326
++	AMOXORD		X5, (X6), X7			// af335326
++	AMOMAXW		X5, (X6), X7			// af2353a6
++	AMOMAXD		X5, (X6), X7			// af3353a6
++	AMOMAXUW	X5, (X6), X7			// af2353e6
++	AMOMAXUD	X5, (X6), X7			// af3353e6
++	AMOMINW		X5, (X6), X7			// af235386
++	AMOMIND		X5, (X6), X7			// af335386
++	AMOMINUW	X5, (X6), X7			// af2353c6
++	AMOMINUD	X5, (X6), X7			// af3353c6
+ 
+ 	// 10.1: Base Counters and Timers
+ 	RDCYCLE		X5				// f32200c0
+diff --git a/src/cmd/internal/obj/riscv/obj.go b/src/cmd/internal/obj/riscv/obj.go
+index 44623a14913ce..43fa7351bf990 100644
+--- a/src/cmd/internal/obj/riscv/obj.go
++++ b/src/cmd/internal/obj/riscv/obj.go
+@@ -2067,17 +2067,22 @@ func instructionsForProg(p *obj.Prog) []*instruction {
+ 		return instructionsForStore(p, ins.as, p.To.Reg)
+ 
+ 	case ALRW, ALRD:
+-		// Set aq to use acquire access ordering, which matches Go's memory requirements.
++		// Set aq to use acquire access ordering
+ 		ins.funct7 = 2
+ 		ins.rs1, ins.rs2 = uint32(p.From.Reg), REG_ZERO
+ 
+ 	case AADDI, AANDI, AORI, AXORI:
+ 		inss = instructionsForOpImmediate(p, ins.as, p.Reg)
+ 
+-	case ASCW, ASCD, AAMOSWAPW, AAMOSWAPD, AAMOADDW, AAMOADDD, AAMOANDW, AAMOANDD, AAMOORW, AAMOORD,
++	case ASCW, ASCD:
++		// Set release access ordering
++		ins.funct7 = 1
++		ins.rd, ins.rs1, ins.rs2 = uint32(p.RegTo2), uint32(p.To.Reg), uint32(p.From.Reg)
++
++	case AAMOSWAPW, AAMOSWAPD, AAMOADDW, AAMOADDD, AAMOANDW, AAMOANDD, AAMOORW, AAMOORD,
+ 		AAMOXORW, AAMOXORD, AAMOMINW, AAMOMIND, AAMOMINUW, AAMOMINUD, AAMOMAXW, AAMOMAXD, AAMOMAXUW, AAMOMAXUD:
+-		// Set aq to use acquire access ordering, which matches Go's memory requirements.
+-		ins.funct7 = 2
++		// Set aqrl to use acquire & release access ordering
++		ins.funct7 = 3
+ 		ins.rd, ins.rs1, ins.rs2 = uint32(p.RegTo2), uint32(p.To.Reg), uint32(p.From.Reg)
+ 
+ 	case AECALL, AEBREAK, ARDCYCLE, ARDTIME, ARDINSTRET:

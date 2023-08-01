@@ -1,0 +1,28 @@
+From 22b86597d3533eb015b4f9e008c78f0e9cadfdce Mon Sep 17 00:00:00 2001
+From: Xiaolin Zhao <zhaoxiaolin@loongson.cn>
+Date: Fri, 10 Mar 2023 14:15:30 +0800
+Subject: [PATCH 23/32] enable c-archive test on linux/loong64
+
+Since c-shared is already supported, c-archive can be used.
+
+Change-Id: I34e15ed4206d9b58f3c7768f654aff147342fa07
+---
+ src/cmd/dist/test.go | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/cmd/dist/test.go b/src/cmd/dist/test.go
+index 04c7fabcaa..920018721d 100644
+--- a/src/cmd/dist/test.go
++++ b/src/cmd/dist/test.go
+@@ -1183,7 +1183,7 @@ func (t *tester) supportedBuildmode(mode string) bool {
+ 		switch pair {
+ 		case "aix-ppc64",
+ 			"darwin-amd64", "darwin-arm64", "ios-arm64",
+-			"linux-amd64", "linux-386", "linux-ppc64le", "linux-riscv64", "linux-s390x",
++			"linux-amd64", "linux-386", "linux-loong64", "linux-ppc64le", "linux-riscv64", "linux-s390x",
+ 			"freebsd-amd64",
+ 			"windows-amd64", "windows-386":
+ 			return true
+-- 
+2.40.0
+

@@ -1,0 +1,42 @@
+From 543cda1a31d968a68ef427000803388bc56622e4 Mon Sep 17 00:00:00 2001
+From: Guoqi Chen <chenguoqi@loongson.cn>
+Date: Wed, 22 Mar 2023 07:03:06 +0800
+Subject: [PATCH 29/32] cmd/{link,internal}: support -buildmode=plugin for
+ loong64
+
+Signed-off-by: Guoqi Chen <chenguoqi@loongson.cn>
+Change-Id: I889409080d5f9f78d2fe78dd5373c428f031b587
+---
+ src/cmd/link/internal/ld/config.go | 2 +-
+ src/internal/platform/supported.go | 2 +-
+ 2 files changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/src/cmd/link/internal/ld/config.go b/src/cmd/link/internal/ld/config.go
+index 4496eecb8f..1d8e6017bb 100644
+--- a/src/cmd/link/internal/ld/config.go
++++ b/src/cmd/link/internal/ld/config.go
+@@ -96,7 +96,7 @@ func (mode *BuildMode) Set(s string) error {
+ 		switch buildcfg.GOOS {
+ 		case "linux":
+ 			switch buildcfg.GOARCH {
+-			case "386", "amd64", "arm", "arm64", "s390x", "ppc64le":
++			case "386", "amd64", "arm", "arm64", "loong64", "s390x", "ppc64le":
+ 			default:
+ 				return badmode()
+ 			}
+diff --git a/src/internal/platform/supported.go b/src/internal/platform/supported.go
+index 3488af801c..b0a4dba9a1 100644
+--- a/src/internal/platform/supported.go
++++ b/src/internal/platform/supported.go
+@@ -143,7 +143,7 @@ func BuildModeSupported(compiler, buildmode, goos, goarch string) bool {
+ 
+ 	case "plugin":
+ 		switch platform {
+-		case "linux/amd64", "linux/arm", "linux/arm64", "linux/386", "linux/s390x", "linux/ppc64le",
++		case "linux/amd64", "linux/arm", "linux/arm64", "linux/loong64", "linux/386", "linux/s390x", "linux/ppc64le",
+ 			"android/amd64", "android/arm", "android/arm64", "android/386",
+ 			"darwin/amd64", "darwin/arm64",
+ 			"freebsd/amd64":
+-- 
+2.40.0
+

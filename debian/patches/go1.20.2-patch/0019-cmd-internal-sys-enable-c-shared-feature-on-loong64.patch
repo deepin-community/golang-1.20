@@ -1,0 +1,26 @@
+From dd8ab93afc5a31c507f3f0a672fc91c50886a9e3 Mon Sep 17 00:00:00 2001
+From: limeidan <limeidan@loongson.cn>
+Date: Thu, 25 Aug 2022 11:14:15 +0800
+Subject: [PATCH 19/32] cmd/internal/sys: enable c-shared feature on loong64
+
+Change-Id: I4e0be140a71b86f4626ed39d76cf3ac78f842018
+---
+ src/internal/platform/supported.go | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/internal/platform/supported.go b/src/internal/platform/supported.go
+index 86c9f07ade..044b28344c 100644
+--- a/src/internal/platform/supported.go
++++ b/src/internal/platform/supported.go
+@@ -106,7 +106,7 @@ func BuildModeSupported(compiler, buildmode, goos, goarch string) bool {
+ 
+ 	case "c-shared":
+ 		switch platform {
+-		case "linux/amd64", "linux/arm", "linux/arm64", "linux/386", "linux/ppc64le", "linux/riscv64", "linux/s390x",
++		case "linux/amd64", "linux/arm", "linux/arm64", "linux/386", "linux/loong64", "linux/ppc64le", "linux/riscv64", "linux/s390x",
+ 			"android/amd64", "android/arm", "android/arm64", "android/386",
+ 			"freebsd/amd64",
+ 			"darwin/amd64", "darwin/arm64",
+-- 
+2.40.0
+
